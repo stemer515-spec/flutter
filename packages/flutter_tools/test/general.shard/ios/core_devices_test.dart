@@ -42,6 +42,13 @@ class LocalFileSystemFake extends Fake implements LocalFileSystem {
   File file(dynamic path) => memoryFileSystem.file(path);
 
   @override
+  Link link(dynamic path) => memoryFileSystem.link(path);
+
+  @override
+  FileSystemEntityType typeSync(String path, {bool followLinks = true}) =>
+      memoryFileSystem.typeSync(path, followLinks: followLinks);
+
+  @override
   Context get path => memoryFileSystem.path;
 
   @override
@@ -217,10 +224,71 @@ void main() {
           bundleId: 'bundle-id',
           launchArguments: <String>[],
           shutdownHooks: FakeShutdownHooks(),
+          mode: BuildMode.debug,
         );
 
         expect(result, isTrue);
         expect(fakeLLDB.attemptedToAttach, isTrue);
+      });
+
+      testWithoutContext('ignores app extension processes', () async {
+        final fakeCoreDeviceControl = FakeIOSCoreDeviceControl(
+          installResult: IOSCoreDeviceInstallResult.fromJson(const <String, Object?>{
+            'info': <String, Object?>{'outcome': 'success'},
+            'result': <String, Object?>{
+              'installedApplications': [
+                <String, Object?>{'installationURL': '/path/to/MyApp.app'},
+              ],
+            },
+          }),
+          launchResult: IOSCoreDeviceLaunchResult.fromJson(const <String, Object?>{
+            'info': <String, Object?>{'outcome': 'success'},
+            'result': <String, Object?>{
+              'process': <String, Object?>{'processIdentifier': 124},
+            },
+          }),
+          runningProcesses: [
+            // Extension process with a lower PID — must be skipped to ensure LLDB
+            // attaches to the main app rather than one of its embedded extensions,
+            // even when the extension appears first in the process list.
+            // See https://github.com/flutter/flutter/issues/183263.
+            IOSCoreDeviceRunningProcess.fromJson(const <String, Object?>{
+              'processIdentifier': 123,
+              'executable':
+                  '/path/to/MyApp.app/PlugIns/SomethingExtension.appex/SomethingExtension',
+            }),
+            // Main app process
+            IOSCoreDeviceRunningProcess.fromJson(const <String, Object?>{
+              'processIdentifier': 124,
+              'executable': '/path/to/MyApp.app',
+            }),
+          ],
+        );
+        final processManager = FakeProcessManager.any();
+        final logger = BufferLogger.test();
+        final processUtils = ProcessUtils(processManager: processManager, logger: logger);
+        final fakeLLDB = FakeLLDB();
+        final launcher = IOSCoreDeviceLauncher(
+          coreDeviceControl: fakeCoreDeviceControl,
+          logger: logger,
+          xcodeDebug: FakeXcodeDebug(),
+          fileSystem: MemoryFileSystem.test(),
+          processUtils: processUtils,
+          lldb: fakeLLDB,
+        );
+
+        final bool result = await launcher.launchAppWithLLDBDebugger(
+          deviceId: 'device-id',
+          bundlePath: 'bundle-path',
+          bundleId: 'bundle-id',
+          launchArguments: <String>[],
+          shutdownHooks: FakeShutdownHooks(),
+          mode: BuildMode.debug,
+        );
+
+        expect(result, isTrue);
+        expect(fakeLLDB.attemptedToAttach, isTrue);
+        expect(fakeLLDB.attachedProcessId, 124);
       });
 
       testWithoutContext('fails on install', () async {
@@ -267,6 +335,7 @@ void main() {
           bundleId: 'bundle-id',
           launchArguments: <String>[],
           shutdownHooks: FakeShutdownHooks(),
+          mode: BuildMode.debug,
         );
 
         expect(result, isFalse);
@@ -311,6 +380,7 @@ void main() {
           bundleId: 'bundle-id',
           launchArguments: <String>[],
           shutdownHooks: FakeShutdownHooks(),
+          mode: BuildMode.debug,
         );
 
         expect(result, isFalse);
@@ -361,6 +431,7 @@ void main() {
           bundleId: 'bundle-id',
           launchArguments: <String>[],
           shutdownHooks: FakeShutdownHooks(),
+          mode: BuildMode.debug,
         );
 
         expect(result, isFalse);
@@ -405,6 +476,7 @@ void main() {
           bundleId: 'bundle-id',
           launchArguments: <String>[],
           shutdownHooks: FakeShutdownHooks(),
+          mode: BuildMode.debug,
         );
 
         expect(result, isFalse);
@@ -451,6 +523,7 @@ void main() {
           bundleId: 'bundle-id',
           launchArguments: <String>[],
           shutdownHooks: FakeShutdownHooks(),
+          mode: BuildMode.debug,
         );
 
         expect(result, isFalse);
@@ -499,6 +572,7 @@ void main() {
           bundleId: 'bundle-id',
           launchArguments: <String>[],
           shutdownHooks: FakeShutdownHooks(),
+          mode: BuildMode.debug,
         );
 
         expect(result, isFalse);
@@ -1902,6 +1976,7 @@ Waiting for the application to terminate...
 2025-09-16 12:15:47.939171-0500 Runner[1230:133819] This log happens after the application is launched but matches an ignore pattern and should be skipped
 This log happens after the application is launched and should be sent to FakeIOSCoreDeviceLogForwarder
 2025-09-16 12:15:47.939171-0500 Runner[1230:133819] flutter: This log happens after the application is launched and should be sent to FakeIOSCoreDeviceLogForwarder
+2026-01-26 16:12:19.095287-0600 Runner[2236:2107639] [UIKit App Config] `UIScene` lifecycle will soon be required. Failure to adopt will result in an assert in the future.
 2025-09-16 12:15:47.939171-0500 Runner[1230:133819] [INFO:flutter/runtime/service_protocol.cc(121)] This log happens after the application is launched and should be sent to FakeIOSCoreDeviceLogForwarder
 ''',
           ),
@@ -1919,13 +1994,14 @@ This log happens after the application is launched and should be sent to FakeIOS
         expect(fakeProcessManager, hasNoRemainingExpectations);
         expect(shutdownHooks.registeredHooks.length, 1);
         expect(logger.errorText, isEmpty);
-        expect(logForwarder.logs.length, 3);
+        expect(logForwarder.logs.length, 4);
         expect(
           logForwarder.logs,
           containsAll([
             'This log happens after the application is launched and should be sent to FakeIOSCoreDeviceLogForwarder',
             '2025-09-16 12:15:47.939171-0500 Runner[1230:133819] flutter: This log happens after the application is launched and should be sent to FakeIOSCoreDeviceLogForwarder',
             '2025-09-16 12:15:47.939171-0500 Runner[1230:133819] [INFO:flutter/runtime/service_protocol.cc(121)] This log happens after the application is launched and should be sent to FakeIOSCoreDeviceLogForwarder',
+            '2026-01-26 16:12:19.095287-0600 Runner[2236:2107639] [UIKit App Config] `UIScene` lifecycle will soon be required. Failure to adopt will result in an assert in the future.',
           ]),
         );
         expect(
@@ -3937,6 +4013,7 @@ class FakeLLDB extends Fake implements LLDB {
   bool attachSuccess;
 
   bool attemptedToAttach = false;
+  int? attachedProcessId;
 
   var _isRunning = false;
   int? _processId;
@@ -3958,8 +4035,10 @@ class FakeLLDB extends Fake implements LLDB {
     required String deviceId,
     required int appProcessId,
     required LLDBLogForwarder lldbLogForwarder,
+    required BuildMode mode,
   }) async {
     attemptedToAttach = true;
+    attachedProcessId = appProcessId;
     return attachSuccess;
   }
 

@@ -4,17 +4,25 @@
 
 package com.flutter.gradle
 
-import com.android.build.gradle.AbstractAppExtension
+import com.android.build.api.AndroidPluginVersion
+import com.android.build.api.dsl.ApplicationExtension
+import com.android.build.api.variant.AndroidComponentsExtension
 import com.android.build.gradle.BaseExtension
 import com.android.build.gradle.internal.dsl.CmakeOptions
 import com.android.build.gradle.internal.dsl.DefaultConfig
 import com.android.builder.model.BuildType
+import com.flutter.gradle.FlutterPluginUtils.BUILT_IN_KOTLIN_DOCS
+import com.flutter.gradle.FlutterPluginUtils.BUILT_IN_KOTLIN_DOCS_FOR_APPS
+import com.flutter.gradle.FlutterPluginUtils.BUILT_IN_KOTLIN_DOCS_FOR_PLUGINS
+import com.flutter.gradle.FlutterPluginUtils.BUILT_IN_KOTLIN_DOCS_TO_REPORT_UNMIGRATED_PLUGINS
+import com.flutter.gradle.FlutterPluginUtils.detectApplyingKotlinGradlePlugin
 import com.flutter.gradle.plugins.PluginHandler
 import io.mockk.called
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkObject
 import io.mockk.slot
+import io.mockk.unmockkObject
 import io.mockk.verify
 import org.gradle.api.Action
 import org.gradle.api.GradleException
@@ -23,8 +31,15 @@ import org.gradle.api.Task
 import org.gradle.api.UnknownTaskException
 import org.gradle.api.file.Directory
 import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.invocation.Gradle
 import org.gradle.api.logging.Logger
+import org.gradle.api.plugins.PluginManager
+import org.gradle.internal.impldep.junit.framework.TestCase.assertFalse
+import org.gradle.internal.impldep.junit.framework.TestCase.assertTrue
 import org.jetbrains.kotlin.gradle.plugin.extraProperties
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
@@ -34,6 +49,34 @@ import kotlin.io.path.createDirectory
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+
+/**
+ * Configuration for a mock Gradle subproject.
+ *
+ * @property name The name of the subproject.
+ * @property declarativelyAppliedPlugins Plugins applied via the modern Gradle `plugins {}` block.
+ *           For more details, see [Gradle Plugins Block Docs](https://docs.gradle.org/current/userguide/plugins_intermediate.html#sec:plugins_block).
+ * @property imperativelyAppliedPlugins Plugins applied via the legacy Gradle `apply plugin:` statement.
+ *           For more details, see [Gradle Old Plugin Application Docs](https://docs.gradle.org/current/userguide/plugins_intermediate.html#sec:old_plugin_application).
+ */
+private data class SubprojectConfig(
+    val name: String,
+    val declarativelyAppliedPlugins: List<String> = emptyList(),
+    val imperativelyAppliedPlugins: List<String> = emptyList()
+)
+
+private class TestEnvironment(
+    val appProject: Project,
+    val plugins: List<Project>,
+    val subprojectsActionSlot: io.mockk.CapturingSlot<Action<Project>> = slot(),
+    val projectsEvaluatedActionSlot: io.mockk.CapturingSlot<Action<Gradle>> = slot()
+) {
+    val appPluginManager: PluginManager get() = appProject.pluginManager
+    val plugin1Manager: PluginManager get() = plugins[0].pluginManager
+    val plugin2Manager: PluginManager get() = plugins[1].pluginManager
+}
 
 class FlutterPluginUtilsTest {
     companion object {
@@ -754,6 +797,764 @@ class FlutterPluginUtilsTest {
         assertThrows<IllegalArgumentException> { projectActionSlot.captured.execute(project) }
     }
 
+    enum class DslType { GROOVY, KOTLIN }
+
+    @Nested
+    inner class SupportBuiltInKotlinTests {
+        @Nested
+        inner class TestApplyingPluginsRegexTests {
+            @Test
+            fun `AGP app regex on single line apply`() {
+                assertSingeLinePluginDetection(FlutterPluginUtils.appPluginRegexKotlin, "com.android.application", DslType.KOTLIN)
+                assertSingeLinePluginDetection(FlutterPluginUtils.appPluginRegexGroovy, "com.android.application", DslType.GROOVY)
+            }
+
+            @Test
+            fun `AGP lib regex on single line apply`() {
+                assertSingeLinePluginDetection(FlutterPluginUtils.libPluginRegexKotlin, "com.android.library", DslType.KOTLIN)
+                assertSingeLinePluginDetection(FlutterPluginUtils.libPluginRegexGroovy, "com.android.library", DslType.GROOVY)
+            }
+
+            @Test
+            fun `KGP regex on single line apply`() {
+                assertSingeLinePluginDetection(FlutterPluginUtils.kgpRegexKotlin, "kotlin-android", DslType.KOTLIN)
+                assertSingeLinePluginDetection(FlutterPluginUtils.kgpRegexGroovy, "kotlin-android", DslType.GROOVY)
+                assertSingeLinePluginDetection(FlutterPluginUtils.kgpRegexKotlin, "org.jetbrains.kotlin.android", DslType.KOTLIN)
+                assertSingeLinePluginDetection(FlutterPluginUtils.kgpRegexGroovy, "org.jetbrains.kotlin.android", DslType.GROOVY)
+            }
+
+            @Test
+            fun `Regexes are successful when multiple plugins are applied`() {
+                val appProjectBuildGradlePluginsBlock =
+                    """
+                    plugins {
+                        id("com.android.application")
+                        id("kotlin-android")
+                    }
+                    """.trimIndent()
+                assertTrue(
+                    FlutterPluginUtils.appPluginRegexKotlin.containsMatchIn(appProjectBuildGradlePluginsBlock)
+                )
+                assertTrue(
+                    FlutterPluginUtils.kgpRegexKotlin.containsMatchIn(appProjectBuildGradlePluginsBlock)
+                )
+
+                assertTrue(
+                    FlutterPluginUtils.appPluginRegexGroovy.containsMatchIn(appProjectBuildGradlePluginsBlock)
+                )
+                assertTrue(
+                    FlutterPluginUtils.kgpRegexGroovy.containsMatchIn(appProjectBuildGradlePluginsBlock)
+                )
+
+                val libProjectBuildGradlePluginsBlock =
+                    """
+                    plugins {
+                        id("com.android.library")
+                        id("org.jetbrains.kotlin.android")
+                    }
+                    """.trimIndent()
+                assertTrue(
+                    FlutterPluginUtils.libPluginRegexKotlin.containsMatchIn(libProjectBuildGradlePluginsBlock)
+                )
+                assertTrue(
+                    FlutterPluginUtils.kgpRegexKotlin.containsMatchIn(libProjectBuildGradlePluginsBlock)
+                )
+
+                assertTrue(
+                    FlutterPluginUtils.libPluginRegexGroovy.containsMatchIn(libProjectBuildGradlePluginsBlock)
+                )
+                assertTrue(
+                    FlutterPluginUtils.kgpRegexGroovy.containsMatchIn(libProjectBuildGradlePluginsBlock)
+                )
+
+                val appProjectBuildGradlePluginsBlockNoParens =
+                    """
+                    plugins {
+                        id 'com.android.application'
+                        id 'kotlin-android'
+                    }
+                    """.trimIndent()
+                assertTrue(
+                    FlutterPluginUtils.appPluginRegexGroovy.containsMatchIn(appProjectBuildGradlePluginsBlockNoParens)
+                )
+                assertTrue(
+                    FlutterPluginUtils.kgpRegexGroovy.containsMatchIn(appProjectBuildGradlePluginsBlockNoParens)
+                )
+
+                assertFalse(
+                    FlutterPluginUtils.appPluginRegexKotlin.containsMatchIn(appProjectBuildGradlePluginsBlockNoParens)
+                )
+                assertFalse(
+                    FlutterPluginUtils.kgpRegexKotlin.containsMatchIn(appProjectBuildGradlePluginsBlockNoParens)
+                )
+
+                val appProjectBuildGradlePluginsBlockMixed =
+                    """
+                    plugins {
+                        id 'com.android.application'
+                        alias 'kotlin-android'
+                    }
+                    """.trimIndent()
+                assertTrue(
+                    FlutterPluginUtils.appPluginRegexGroovy.containsMatchIn(appProjectBuildGradlePluginsBlockMixed)
+                )
+                assertTrue(
+                    FlutterPluginUtils.kgpRegexGroovy.containsMatchIn(appProjectBuildGradlePluginsBlockMixed)
+                )
+
+                assertFalse(
+                    FlutterPluginUtils.appPluginRegexKotlin.containsMatchIn(appProjectBuildGradlePluginsBlockMixed)
+                )
+                assertFalse(
+                    FlutterPluginUtils.kgpRegexKotlin.containsMatchIn(appProjectBuildGradlePluginsBlockMixed)
+                )
+            }
+
+            @Test
+            fun `Regexes fail when multiple plugins are applied`() {
+                val kotlinSameLine =
+                    """
+                    plugins {
+                        id("com.android.application") id("kotlin-android")
+                    }
+                    """.trimIndent()
+
+                assertFalse(
+                    FlutterPluginUtils.appPluginRegexKotlin.containsMatchIn(kotlinSameLine),
+                    "Should fail: multi-id on one line"
+                )
+                assertFalse(
+                    FlutterPluginUtils.kgpRegexKotlin.containsMatchIn(kotlinSameLine),
+                    "Should fail: multi-id on one line"
+                )
+
+                val groovySameLine =
+                    """
+                    plugins {
+                        id 'com.android.application' id 'kotlin-android'
+                    }
+                    """.trimIndent()
+
+                assertFalse(
+                    FlutterPluginUtils.appPluginRegexGroovy.containsMatchIn(groovySameLine),
+                    "Should fail: multi-id on one line"
+                )
+                assertFalse(
+                    FlutterPluginUtils.kgpRegexGroovy.containsMatchIn(groovySameLine),
+                    "Should fail: multi-id on one line"
+                )
+
+                val appProjectBuildGradlePluginsCommentOnePlugin =
+                    """
+                    plugins {
+                       id 'com.android.application'
+                       // alias 'kotlin-android'
+                    }
+                    """.trimIndent()
+                assertTrue(
+                    FlutterPluginUtils.appPluginRegexGroovy.containsMatchIn(appProjectBuildGradlePluginsCommentOnePlugin)
+                )
+                assertFalse(
+                    FlutterPluginUtils.kgpRegexGroovy.containsMatchIn(appProjectBuildGradlePluginsCommentOnePlugin)
+                )
+
+                assertFalse(
+                    FlutterPluginUtils.appPluginRegexKotlin.containsMatchIn(appProjectBuildGradlePluginsCommentOnePlugin)
+                )
+                assertFalse(
+                    FlutterPluginUtils.kgpRegexKotlin.containsMatchIn(appProjectBuildGradlePluginsCommentOnePlugin)
+                )
+
+                val appProjectBuildGradlePluginsComment =
+                    """
+                    // plugins {
+                    //    id 'com.android.application'
+                    //    alias 'kotlin-android'
+                    // }
+                    """.trimIndent()
+                assertFalse(
+                    FlutterPluginUtils.appPluginRegexGroovy.containsMatchIn(appProjectBuildGradlePluginsComment)
+                )
+                assertFalse(
+                    FlutterPluginUtils.kgpRegexGroovy.containsMatchIn(appProjectBuildGradlePluginsComment)
+                )
+
+                assertFalse(
+                    FlutterPluginUtils.appPluginRegexKotlin.containsMatchIn(appProjectBuildGradlePluginsComment)
+                )
+                assertFalse(
+                    FlutterPluginUtils.kgpRegexKotlin.containsMatchIn(appProjectBuildGradlePluginsComment)
+                )
+            }
+        }
+
+        fun assertSingeLinePluginDetection(
+            regex: Regex,
+            pluginId: String,
+            dslType: DslType
+        ) {
+            if (dslType == DslType.GROOVY) {
+                assertTrue(regex.containsMatchIn("apply plugin: '$pluginId'"))
+                assertTrue(regex.containsMatchIn("apply plugin: \"$pluginId\""))
+                assertTrue(regex.containsMatchIn("plugins { id '$pluginId' }"))
+                assertTrue(regex.containsMatchIn("plugins { id \"$pluginId\" }"))
+                assertTrue(regex.containsMatchIn("plugins {\n  id '$pluginId'\n}"))
+                assertTrue(regex.containsMatchIn("plugins { alias '$pluginId' }"))
+
+                assertFalse(regex.containsMatchIn("apply plugin\n:'$pluginId'"), "Newline before colon failure")
+                assertFalse(regex.containsMatchIn("plugins { id\n'$pluginId' }"), "newline before opening quote")
+            }
+            if (dslType == DslType.KOTLIN) {
+                assertTrue(regex.containsMatchIn("plugins {\n  id(\"$pluginId\")\n}"))
+                assertTrue(regex.containsMatchIn("plugins { id(\n'$pluginId'\n) }"))
+
+                assertFalse(regex.containsMatchIn("plugins { id '$pluginId' }"), "Kotlin DSL requires parentheses")
+                assertFalse(regex.containsMatchIn("apply plugin: '$pluginId'"), "Kotlin DSL does not use apply plugin: for AGP/KGP")
+            }
+
+            assertTrue(regex.containsMatchIn("plugins { id('$pluginId') }"))
+            assertTrue(regex.containsMatchIn("plugins { id(\"$pluginId\") }"))
+            assertTrue(regex.containsMatchIn("plugins { alias('$pluginId') }"))
+            assertTrue(regex.containsMatchIn("plugins { alias(\"$pluginId\") }"))
+
+            assertFalse(regex.containsMatchIn("// id '$pluginId'"), "Failed to ignore single line comment")
+            assertFalse(regex.containsMatchIn("// id('$pluginId')"), "Failed to ignore single line comment")
+
+            // Check newline constraints
+            assertFalse(regex.containsMatchIn("plugins\n{ id('$pluginId') }"), "Newline before opening bracket should fail")
+            assertFalse(regex.containsMatchIn("plugins { id\n('$pluginId') }"), "Newline before opening parentheses should fail")
+            // Check spacing inside quotes
+            assertFalse(regex.containsMatchIn("id ' $pluginId '"), "Should fail when there are spaces in quotes")
+        }
+
+        @Nested
+        inner class DetectApplyingKotlinGradlePluginTests {
+            private val rootProject = mockk<Project>()
+            private val mockGradle = mockk<Gradle>()
+            private val mockLogger = mockk<Logger>(relaxed = true)
+
+            // This AGP version will should match the Flutter create template values.
+            // In //packages/flutter_tools/lib/src/android/gradle_utils.dart
+            private val templateAgpVersion = AndroidPluginVersion(9, 0, 1)
+
+            private val errorAgpVersion = DependencyVersionChecker.errorAGPVersion
+
+            @BeforeEach
+            fun setUp() {
+                mockkObject(VersionFetcher)
+            }
+
+            @AfterEach
+            fun tearDown() {
+                unmockkObject(VersionFetcher)
+            }
+
+            private fun createSubproject(
+                tempDir: Path,
+                projectName: String,
+                declarativelyAppliedPlugins: List<String> = emptyList(),
+                imperativelyAppliedPlugins: List<String> = emptyList()
+            ): Project {
+                val projectDir = tempDir.resolve(projectName).toFile().apply { mkdirs() }
+                val buildGradleFile =
+                    File(projectDir, "build.gradle").apply {
+                        createNewFile()
+                        // Expected output of declarativeBlock if declarativelyAppliedPlugins contains ["kotlin-android"]:
+                        // plugins {
+                        //     id("kotlin-android")
+                        // }
+                        val declarativeBlock =
+                            if (declarativelyAppliedPlugins.isNotEmpty()) {
+                                "plugins {\n" + declarativelyAppliedPlugins.joinToString("\n") { "    id(\"$it\")" } + "\n}\n"
+                            } else {
+                                ""
+                            }
+                        // Expected output of imperativeBlock if imperativelyAppliedPlugins contains ["kotlin-android"]:
+                        // apply plugin: 'kotlin-android'
+                        val imperativeBlock =
+                            if (imperativelyAppliedPlugins.isNotEmpty()) {
+                                imperativelyAppliedPlugins.joinToString("\n") { "apply plugin: '$it'" } + "\n"
+                            } else {
+                                ""
+                            }
+                        writeText(declarativeBlock + imperativeBlock)
+                    }
+                val pluginManager = mockk<PluginManager>(relaxed = true)
+                val project = mockk<Project>()
+                every { project.name } returns projectName
+                every { project.projectDir } returns projectDir
+                every { project.buildFile } returns buildGradleFile
+                every { project.logger } returns mockLogger
+                every { project.pluginManager } returns pluginManager
+                every { project.rootProject } returns rootProject
+                every { project.gradle } returns mockGradle
+
+                val extensions = mockk<org.gradle.api.plugins.ExtensionContainer>()
+                every { extensions.findByType(any<Class<*>>()) } returns null
+                every { project.extensions } returns extensions
+
+                return project
+            }
+
+            private fun setupTest(
+                tempDir: Path,
+                agpVersion: AndroidPluginVersion,
+                appConfig: SubprojectConfig,
+                pluginConfigs: List<SubprojectConfig>
+            ): TestEnvironment {
+                every { VersionFetcher.getAGPVersion(any()) } returns agpVersion
+
+                val appProject =
+                    createSubproject(
+                        tempDir = tempDir,
+                        projectName = appConfig.name,
+                        declarativelyAppliedPlugins = appConfig.declarativelyAppliedPlugins,
+                        imperativelyAppliedPlugins = appConfig.imperativelyAppliedPlugins
+                    )
+
+                val pluginProjects =
+                    pluginConfigs.map { config ->
+                        createSubproject(
+                            tempDir = tempDir,
+                            projectName = config.name,
+                            declarativelyAppliedPlugins = config.declarativelyAppliedPlugins,
+                            imperativelyAppliedPlugins = config.imperativelyAppliedPlugins
+                        )
+                    }
+
+                val allProjects = setOf(appProject) + pluginProjects
+                every { rootProject.subprojects } returns allProjects
+
+                val testProject = TestEnvironment(appProject, pluginProjects)
+                every { rootProject.subprojects(capture(testProject.subprojectsActionSlot)) } returns Unit
+                every { mockGradle.projectsEvaluated(capture(testProject.projectsEvaluatedActionSlot)) } returns Unit
+
+                return testProject
+            }
+
+            private fun executeDetectApplyingKotlinGradlePlugin(testProject: TestEnvironment) {
+                detectApplyingKotlinGradlePlugin(testProject.appProject)
+
+                verify { rootProject.subprojects(capture(testProject.subprojectsActionSlot)) }
+                testProject.subprojectsActionSlot.captured.execute(testProject.appProject)
+                for (plugin in testProject.plugins) {
+                    testProject.subprojectsActionSlot.captured.execute(plugin)
+                }
+
+                verify { mockGradle.projectsEvaluated(capture(testProject.projectsEvaluatedActionSlot)) }
+                testProject.projectsEvaluatedActionSlot.captured.execute(mockGradle)
+            }
+
+            @Nested
+            inner class TestLogWarningsWhenAGPis9OrHigher {
+                @Test
+                fun `logs app warning when KGP is only applied in app`(
+                    @TempDir tempDir: Path
+                ) {
+                    val testProject =
+                        setupTest(
+                            tempDir = tempDir,
+                            agpVersion = templateAgpVersion,
+                            appConfig =
+                                SubprojectConfig(
+                                    "app",
+                                    declarativelyAppliedPlugins = listOf("com.android.application", "kotlin-android")
+                                ),
+                            pluginConfigs =
+                                listOf(
+                                    SubprojectConfig(
+                                        "plugin",
+                                        declarativelyAppliedPlugins = listOf("com.android.library")
+                                    )
+                                )
+                        )
+
+                    val appPluginManager = testProject.appPluginManager
+                    val plugin1Manager = testProject.plugin1Manager
+
+                    executeDetectApplyingKotlinGradlePlugin(testProject)
+
+                    verify {
+                        mockLogger.error(
+                            match {
+                                it.contains("WARNING: Your Android app project") &&
+                                    it.contains("applies the Kotlin Gradle Plugin") &&
+                                    it.contains(BUILT_IN_KOTLIN_DOCS_FOR_APPS)
+                            }
+                        )
+                    }
+
+                    verify(exactly = 0) {
+                        mockLogger.error(match { it.contains("WARNING: Your app uses the following plugins") })
+                    }
+                    verify(exactly = 0) { appPluginManager.apply("kotlin-android") }
+                    verify(exactly = 1) { plugin1Manager.apply("kotlin-android") }
+                }
+
+                @Test
+                fun `logs plugin warning when KGP is only applied in one plugin`(
+                    @TempDir tempDir: Path
+                ) {
+                    val testProject =
+                        setupTest(
+                            tempDir = tempDir,
+                            agpVersion = templateAgpVersion,
+                            appConfig =
+                                SubprojectConfig(
+                                    "app",
+                                    declarativelyAppliedPlugins = listOf("com.android.application")
+                                ),
+                            pluginConfigs =
+                                listOf(
+                                    SubprojectConfig(
+                                        "plugin",
+                                        declarativelyAppliedPlugins = listOf("com.android.library", "kotlin-android")
+                                    )
+                                )
+                        )
+
+                    val appPluginManager = testProject.appPluginManager
+                    val plugin1Manager = testProject.plugin1Manager
+
+                    executeDetectApplyingKotlinGradlePlugin(testProject)
+
+                    verify {
+                        mockLogger.error(
+                            match {
+                                it.contains("WARNING: Your app uses the following plugins") &&
+                                    it.contains(BUILT_IN_KOTLIN_DOCS_TO_REPORT_UNMIGRATED_PLUGINS) &&
+                                    it.contains(BUILT_IN_KOTLIN_DOCS_FOR_PLUGINS)
+                            }
+                        )
+                    }
+
+                    verify(exactly = 0) {
+                        mockLogger.error(match { it.contains("WARNING: Your Android app project") })
+                    }
+                    verify(exactly = 1) { appPluginManager.apply("kotlin-android") }
+                    verify(exactly = 0) { plugin1Manager.apply("kotlin-android") }
+                }
+
+                @Test
+                fun `logs app and plugin warning when KGP is applied in both app and plugins`(
+                    @TempDir tempDir: Path
+                ) {
+                    val testProject =
+                        setupTest(
+                            tempDir = tempDir,
+                            agpVersion = templateAgpVersion,
+                            appConfig =
+                                SubprojectConfig(
+                                    "app",
+                                    declarativelyAppliedPlugins = listOf("com.android.application", "kotlin-android")
+                                ),
+                            pluginConfigs =
+                                listOf(
+                                    SubprojectConfig(
+                                        "plugin",
+                                        declarativelyAppliedPlugins = listOf("com.android.library", "kotlin-android")
+                                    )
+                                )
+                        )
+
+                    val appPluginManager = testProject.appPluginManager
+                    val plugin1Manager = testProject.plugin1Manager
+
+                    executeDetectApplyingKotlinGradlePlugin(testProject)
+
+                    verify {
+                        mockLogger.error(
+                            match {
+                                it.contains("WARNING: Your Android app project") &&
+                                    it.contains("applies the Kotlin Gradle Plugin") &&
+                                    it.contains(BUILT_IN_KOTLIN_DOCS_FOR_APPS)
+                            }
+                        )
+                    }
+
+                    verify {
+                        mockLogger.error(
+                            match {
+                                it.contains("WARNING: Your app uses the following plugins") &&
+                                    it.contains(BUILT_IN_KOTLIN_DOCS_TO_REPORT_UNMIGRATED_PLUGINS) &&
+                                    it.contains(BUILT_IN_KOTLIN_DOCS_FOR_PLUGINS)
+                            }
+                        )
+                    }
+
+                    verify(exactly = 0) { appPluginManager.apply("kotlin-android") }
+                    verify(exactly = 0) { plugin1Manager.apply("kotlin-android") }
+                }
+
+                @Test
+                fun `logs app and plugin warning when imperative KGP configuration is applied in both app and plugins`(
+                    @TempDir tempDir: Path
+                ) {
+                    val testProject =
+                        setupTest(
+                            tempDir = tempDir,
+                            agpVersion = templateAgpVersion,
+                            appConfig =
+                                SubprojectConfig(
+                                    "app",
+                                    imperativelyAppliedPlugins =
+                                        listOf(
+                                            "com.android.application",
+                                            "kotlin-android"
+                                        )
+                                ),
+                            pluginConfigs =
+                                listOf(
+                                    SubprojectConfig(
+                                        "plugin1",
+                                        imperativelyAppliedPlugins =
+                                            listOf(
+                                                "com.android.library",
+                                                "kotlin-android"
+                                            )
+                                    ),
+                                    SubprojectConfig(
+                                        "plugin2",
+                                        imperativelyAppliedPlugins =
+                                            listOf(
+                                                "com.android.library",
+                                                "kotlin-android"
+                                            )
+                                    )
+                                )
+                        )
+
+                    val appPluginManager = testProject.appPluginManager
+                    val plugin1Manager = testProject.plugin1Manager
+                    val plugin2Manager = testProject.plugin2Manager
+
+                    executeDetectApplyingKotlinGradlePlugin(testProject)
+
+                    verify {
+                        mockLogger.error(
+                            match {
+                                it.contains("WARNING: Your Android app project") &&
+                                    it.contains("applies the Kotlin Gradle Plugin") &&
+                                    it.contains(BUILT_IN_KOTLIN_DOCS_FOR_APPS)
+                            }
+                        )
+                    }
+
+                    verify {
+                        mockLogger.error(
+                            match {
+                                it.contains("WARNING: Your app uses the following plugins") &&
+                                    it.contains(BUILT_IN_KOTLIN_DOCS_TO_REPORT_UNMIGRATED_PLUGINS) &&
+                                    it.contains(BUILT_IN_KOTLIN_DOCS_FOR_PLUGINS)
+                            }
+                        )
+                    }
+
+                    verify(exactly = 0) { appPluginManager.apply("kotlin-android") }
+                    verify(exactly = 0) { plugin1Manager.apply("kotlin-android") }
+                    verify(exactly = 0) { plugin2Manager.apply("kotlin-android") }
+                }
+
+                @Test
+                fun `does not log when migrated to Built-in Kotlin`(
+                    @TempDir tempDir: Path
+                ) {
+                    val testProject =
+                        setupTest(
+                            tempDir = tempDir,
+                            agpVersion = templateAgpVersion,
+                            appConfig =
+                                SubprojectConfig(
+                                    "app",
+                                    imperativelyAppliedPlugins = listOf("com.android.application")
+                                ),
+                            pluginConfigs =
+                                listOf(
+                                    SubprojectConfig(
+                                        "plugin",
+                                        imperativelyAppliedPlugins = listOf("com.android.library")
+                                    )
+                                )
+                        )
+
+                    val appPluginManager = testProject.appPluginManager
+                    val plugin1Manager = testProject.plugin1Manager
+
+                    executeDetectApplyingKotlinGradlePlugin(testProject)
+
+                    verify(exactly = 0) {
+                        mockLogger.error(any())
+                    }
+
+                    verify(exactly = 1) { appPluginManager.apply("kotlin-android") }
+                    verify(exactly = 1) { plugin1Manager.apply("kotlin-android") }
+                }
+
+                @Test
+                fun `logs KGP warning when KGP attempts to but fails to apply`(
+                    @TempDir tempDir: Path
+                ) {
+                    val testProject =
+                        setupTest(
+                            tempDir = tempDir,
+                            agpVersion = templateAgpVersion,
+                            appConfig =
+                                SubprojectConfig(
+                                    "app",
+                                    declarativelyAppliedPlugins = listOf("com.android.application")
+                                ),
+                            pluginConfigs =
+                                listOf(
+                                    SubprojectConfig(
+                                        "plugin",
+                                        declarativelyAppliedPlugins = listOf("com.android.library")
+                                    )
+                                )
+                        )
+
+                    val appPluginManager = testProject.appPluginManager
+                    val plugin1Manager = testProject.plugin1Manager
+
+                    every { appPluginManager.apply("kotlin-android") } throws Exception("KGP not on classpath")
+                    every { plugin1Manager.apply("kotlin-android") } throws Exception("KGP not on classpath")
+
+                    executeDetectApplyingKotlinGradlePlugin(testProject)
+
+                    verify(exactly = 0) {
+                        mockLogger.error(any())
+                    }
+
+                    verify {
+                        mockLogger.quiet(
+                            match {
+                                it.contains("Applying the Kotlin Android Plugin (KGP) was unsuccessful") &&
+                                    it.contains("ensure KGP is declared in the root plugins block") &&
+                                    it.contains(BUILT_IN_KOTLIN_DOCS)
+                            }
+                        )
+                    }
+                }
+            }
+
+            @Nested
+            inner class TestLogWarningsWhenAGPIsLessThan9 {
+                @Test
+                fun `does not log warnings when migrated to built-in kotlin`(
+                    @TempDir tempDir: Path
+                ) {
+                    val testProject =
+                        setupTest(
+                            tempDir = tempDir,
+                            agpVersion = errorAgpVersion,
+                            appConfig =
+                                SubprojectConfig(
+                                    "app",
+                                    declarativelyAppliedPlugins = listOf("com.android.application")
+                                ),
+                            pluginConfigs =
+                                listOf(
+                                    SubprojectConfig(
+                                        "plugin",
+                                        declarativelyAppliedPlugins = listOf("com.android.library")
+                                    )
+                                )
+                        )
+
+                    val appPluginManager = testProject.appPluginManager
+                    val plugin1Manager = testProject.plugin1Manager
+
+                    executeDetectApplyingKotlinGradlePlugin(testProject)
+
+                    // No warnings should be logged because AGP version is < 9.
+                    verify(exactly = 0) { mockLogger.error(any()) }
+
+                    // KGP is still applied in case the entire project has been migrated.
+                    verify(exactly = 1) { appPluginManager.apply("kotlin-android") }
+                    verify(exactly = 1) { plugin1Manager.apply("kotlin-android") }
+                }
+
+                @Test
+                fun `does not log warnings when KGP is applied`(
+                    @TempDir tempDir: Path
+                ) {
+                    val testProject =
+                        setupTest(
+                            tempDir = tempDir,
+                            agpVersion = errorAgpVersion,
+                            appConfig =
+                                SubprojectConfig(
+                                    "app",
+                                    declarativelyAppliedPlugins = listOf("com.android.application", "kotlin-android")
+                                ),
+                            pluginConfigs =
+                                listOf(
+                                    SubprojectConfig(
+                                        "plugin",
+                                        declarativelyAppliedPlugins = listOf("com.android.library", "kotlin-android")
+                                    )
+                                )
+                        )
+
+                    val appPluginManager = testProject.appPluginManager
+                    val plugin1Manager = testProject.plugin1Manager
+
+                    executeDetectApplyingKotlinGradlePlugin(testProject)
+
+                    // No warnings should be logged because AGP version is < 9.
+                    verify(exactly = 0) { mockLogger.error(any()) }
+
+                    verify(exactly = 0) { appPluginManager.apply("kotlin-android") }
+                    verify(exactly = 0) { plugin1Manager.apply("kotlin-android") }
+                }
+
+                @Test
+                fun `logs KGP warning when KGP attempts to but fails to apply`(
+                    @TempDir tempDir: Path
+                ) {
+                    val testProject =
+                        setupTest(
+                            tempDir = tempDir,
+                            agpVersion = errorAgpVersion,
+                            appConfig =
+                                SubprojectConfig(
+                                    "app",
+                                    declarativelyAppliedPlugins = listOf("com.android.application")
+                                ),
+                            pluginConfigs =
+                                listOf(
+                                    SubprojectConfig(
+                                        "plugin",
+                                        declarativelyAppliedPlugins = listOf("com.android.library")
+                                    )
+                                )
+                        )
+
+                    val appPluginManager = testProject.appPluginManager
+                    val plugin1Manager = testProject.plugin1Manager
+
+                    every { appPluginManager.apply("kotlin-android") } throws Exception("KGP not on classpath")
+                    every { plugin1Manager.apply("kotlin-android") } throws Exception("KGP not on classpath")
+
+                    executeDetectApplyingKotlinGradlePlugin(testProject)
+
+                    verify(exactly = 0) {
+                        mockLogger.error(any())
+                    }
+
+                    verify {
+                        mockLogger.quiet(
+                            match {
+                                it.contains("Applying the Kotlin Android Plugin (KGP) was unsuccessful") &&
+                                    it.contains("ensure KGP is declared in the root plugins block") &&
+                                    it.contains(BUILT_IN_KOTLIN_DOCS)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     // forceNdkDownload
     @Test
     fun `forceNdkDownload skips projects which are already configuring a native build`(
@@ -881,7 +1682,7 @@ class FlutterPluginUtilsTest {
         every { buildType.name } returns "debug"
         every { buildType.isDebuggable } returns true
         every { project.hasProperty("local-engine-repo") } returns false
-        every { project.extensions.findByType(AbstractAppExtension::class.java) } returns mockk<AbstractAppExtension>()
+        every { project.extensions.findByType(ApplicationExtension::class.java) } returns mockk<ApplicationExtension>()
         every { project.hasProperty("target-platform") } returns false
         every { project.configurations.named("api") } returns mockk()
         every { project.dependencies.add(any(), any()) } returns mockk()
@@ -919,7 +1720,7 @@ class FlutterPluginUtilsTest {
         every { buildType.name } returns "release"
         every { buildType.isDebuggable } returns false
         every { project.hasProperty("local-engine-repo") } returns false
-        every { project.extensions.findByType(AbstractAppExtension::class.java) } returns mockk<AbstractAppExtension>()
+        every { project.extensions.findByType(ApplicationExtension::class.java) } returns mockk<ApplicationExtension>()
         every { project.hasProperty("target-platform") } returns false
         every { project.configurations.named("api") } returns mockk()
         every { project.dependencies.add(any(), any()) } returns mockk()
@@ -973,7 +1774,7 @@ class FlutterPluginUtilsTest {
         every { buildType.name } returns "debug"
         every { buildType.isDebuggable } returns true
         every { project.hasProperty("local-engine-repo") } returns false
-        every { project.extensions.findByType(AbstractAppExtension::class.java) } returns mockk<AbstractAppExtension>()
+        every { project.extensions.findByType(ApplicationExtension::class.java) } returns mockk<ApplicationExtension>()
         every { project.hasProperty("target-platform") } returns false
         every { project.configurations.named("api") } returns mockk()
         every { project.dependencies.add(any(), any()) } returns mockk()
@@ -1047,7 +1848,10 @@ class FlutterPluginUtilsTest {
     @Test
     fun `addTaskForPrintBuildVariants adds task for printing build variants`() {
         val project = mockk<Project>()
-        every { project.extensions.getByType(AbstractAppExtension::class.java) } returns mockk()
+        val androidComponents = mockk<AndroidComponentsExtension<*, *, *>>(relaxed = true)
+        val listProperty = mockk<org.gradle.api.provider.ListProperty<String>>()
+        every { project.extensions.getByType(AndroidComponentsExtension::class.java) } returns androidComponents
+        every { project.objects.listProperty(String::class.java) } returns listProperty
         every { project.tasks.register(any(), any<Action<Task>>()) } returns mockk()
         val captureSlot = slot<Action<Task>>()
 

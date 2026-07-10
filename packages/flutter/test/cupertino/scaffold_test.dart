@@ -537,6 +537,7 @@ void main() {
     addTearDown(scrollController.dispose);
     await tester.pumpWidget(
       CupertinoApp(
+<<<<<<< HEAD
         home: Builder(
           builder: (BuildContext context) {
             return PrimaryScrollController(
@@ -557,11 +558,67 @@ void main() {
       message,
       (ByteData? data) {},
     );
+=======
+        home: MediaQuery(
+          data: const MediaQueryData(padding: EdgeInsets.only(top: 25.0)), // status bar
+          child: Builder(
+            builder: (BuildContext context) {
+              return PrimaryScrollController(
+                controller: scrollController,
+                child: const CupertinoPageScaffold(
+                  child: SingleChildScrollView(primary: true, child: SizedBox(height: 12345)),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+
+    tester.simulateStatusBarTap();
+>>>>>>> ee80f08bbf97172ec030b8751ceab557177a34a6
     await tester.pumpAndSettle();
 
     expect(scrollController.offset, 0.0);
   });
 
+<<<<<<< HEAD
+=======
+  testWidgets('status bar tap only scrolls the foregrounded primary controller', (
+    WidgetTester tester,
+  ) async {
+    final app = CupertinoApp(
+      initialRoute: 'a',
+      onGenerateInitialRoutes: (initialRoute) {
+        return [
+          CupertinoPageRoute(builder: (context) => _ScaffoldWithPrimaryScrollView()),
+          CupertinoPageRoute(builder: (context) => _ScaffoldWithPrimaryScrollView()),
+        ];
+      },
+      onGenerateRoute: (_) => throw UnimplementedError(),
+    );
+    await tester.pumpWidget(app);
+
+    final Iterable<ScrollableState> scrollables = tester.stateList<ScrollableState>(
+      find.descendant(
+        of: find.byType(_ScaffoldWithPrimaryScrollView, skipOffstage: false),
+        matching: find.byType(Scrollable, skipOffstage: false),
+        skipOffstage: false,
+      ),
+    );
+
+    final [ScrollableState scrollable1, ScrollableState scrollable2] = scrollables.toList();
+    expect(scrollable1.position.pixels, 1000);
+    expect(scrollable2.position.pixels, 1000);
+
+    tester.simulateStatusBarTap();
+    await tester.pumpAndSettle();
+
+    expect(scrollable1.position.pixels, 1000);
+    expect(scrollable2.position.pixels, 0);
+  });
+
+>>>>>>> ee80f08bbf97172ec030b8751ceab557177a34a6
   testWidgets('CupertinoPageScaffold does not crash at zero area', (WidgetTester tester) async {
     await tester.pumpWidget(
       const CupertinoApp(
@@ -572,4 +629,25 @@ void main() {
     );
     expect(tester.getSize(find.byType(CupertinoPageScaffold)), Size.zero);
   });
+}
+
+class _ScaffoldWithPrimaryScrollView extends StatefulWidget {
+  @override
+  State<StatefulWidget> createState() => _ScaffoldWithPrimaryScrollViewState();
+}
+
+class _ScaffoldWithPrimaryScrollViewState extends State<_ScaffoldWithPrimaryScrollView> {
+  final ScrollController controller = ScrollController(initialScrollOffset: 1000);
+  @override
+  Widget build(BuildContext context) {
+    return MediaQuery(
+      data: const MediaQueryData(padding: EdgeInsets.only(top: 25.0)), // status bar
+      child: PrimaryScrollController(
+        controller: controller,
+        child: const CupertinoPageScaffold(
+          child: SingleChildScrollView(primary: true, child: SizedBox(height: 2000)),
+        ),
+      ),
+    );
+  }
 }
