@@ -43,7 +43,7 @@ jobs:
 
       - name: Install Codemagic CLI tools
         run: |
-          VENV_DIR="$RUNNER_TEMP/codemagic-cli-tools"
+          VENV_DIR="${{ runner.temp }}/codemagic-cli-tools"
           python3 -m venv "$VENV_DIR"
           "$VENV_DIR/bin/python" -m pip install --upgrade pip
           "$VENV_DIR/bin/python" -m pip install codemagic-cli-tools
