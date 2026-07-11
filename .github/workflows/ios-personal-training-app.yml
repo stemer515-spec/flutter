@@ -18,13 +18,13 @@ jobs:
     env:
       APP_DIR: app_repo/examples/personal_training_app
       IOS_BUNDLE_ID: com.simtrainingpartner.simtrainingpartner
+      APPLE_TEAM_ID: 5QHDS9AQFB
       LANG: en_US.UTF-8
       LC_ALL: en_US.UTF-8
       COCOAPODS_DISABLE_STATS: "true"
-      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-      APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APP_STORE_CONNECT_KEY_IDENTIFIER }}
-      APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
-      APP_STORE_CONNECT_CERTIFICATE_KEY: ${{ secrets.APP_STORE_CONNECT_CERTIFICATE_KEY }}
+      IOS_DISTRIBUTION_CERTIFICATE_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
+      IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+      IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
 
     steps:
       - name: Checkout
@@ -46,13 +46,6 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Install Codemagic CLI tools
-        run: |
-          brew update
-          brew install pipx
-          pipx install codemagic-cli-tools
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
       - name: Prepare iOS build directories
         run: |
           mkdir -p "$APP_DIR/build/ios/SourcePackages"
@@ -71,20 +64,33 @@ jobs:
       - name: Set up iOS signing
         run: |
           cd "$APP_DIR"
-          if [ -z "$APP_STORE_CONNECT_CERTIFICATE_KEY" ]; then
-            echo "Missing secret: APP_STORE_CONNECT_CERTIFICATE_KEY"
+          if [ -z "$IOS_DISTRIBUTION_CERTIFICATE_BASE64" ] || [ -z "$IOS_DISTRIBUTION_CERTIFICATE_PASSWORD" ] || [ -z "$IOS_PROVISIONING_PROFILE_BASE64" ]; then
+            echo "Missing one or more signing secrets: IOS_DISTRIBUTION_CERTIFICATE_BASE64, IOS_DISTRIBUTION_CERTIFICATE_PASSWORD, IOS_PROVISIONING_PROFILE_BASE64"
             exit 1
           fi
-          printf "%s" "$APP_STORE_CONNECT_CERTIFICATE_KEY" > "$RUNNER_TEMP/cert_key"
-          keychain initialize
-          app-store-connect fetch-signing-files \
-            "$IOS_BUNDLE_ID" \
-            --platform IOS \
-            --type IOS_APP_STORE \
-            --certificate-key=@file:"$RUNNER_TEMP/cert_key" \
-            --create
-          keychain add-certificates
-          xcode-project use-profiles
+          KEYCHAIN_PATH="$RUNNER_TEMP/build-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+
+          echo "$IOS_DISTRIBUTION_CERTIFICATE_BASE64" | base64 -D > "$RUNNER_TEMP/certificate.p12"
+          echo "$IOS_PROVISIONING_PROFILE_BASE64" | base64 -D > "$RUNNER_TEMP/profile.mobileprovision"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          security default-keychain -d user -s "$KEYCHAIN_PATH"
+
+          security import "$RUNNER_TEMP/certificate.p12" -k "$KEYCHAIN_PATH" -P "$IOS_DISTRIBUTION_CERTIFICATE_PASSWORD" -A
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp "$RUNNER_TEMP/profile.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/"
+
+          # Ensure team is explicitly set for the Runner target when missing.
+          if ! grep -q "DEVELOPMENT_TEAM = $APPLE_TEAM_ID;" ios/Runner.xcodeproj/project.pbxproj; then
+            sed -i '' "s/PRODUCT_BUNDLE_IDENTIFIER = $IOS_BUNDLE_ID;/DEVELOPMENT_TEAM = $APPLE_TEAM_ID;\
+				PRODUCT_BUNDLE_IDENTIFIER = $IOS_BUNDLE_ID;/g" ios/Runner.xcodeproj/project.pbxproj
+          fi
 
       - name: Flutter pub get
         run: |
