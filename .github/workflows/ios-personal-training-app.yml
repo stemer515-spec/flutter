@@ -17,6 +17,7 @@ jobs:
     runs-on: macos-14
     env:
       APP_DIR: app_repo/examples/personal_training_app
+      IOS_BUNDLE_ID: com.simtrainingpartner.simtrainingpartner
       APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
       APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APP_STORE_CONNECT_KEY_IDENTIFIER }}
       APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
@@ -69,7 +70,7 @@ jobs:
           ssh-keygen -t rsa -b 2048 -m PEM -f "$RUNNER_TEMP/cert_key" -q -N ""
           keychain initialize
           app-store-connect fetch-signing-files \
-            "$(xcode-project detect-bundle-id)" \
+            "$IOS_BUNDLE_ID" \
             --platform IOS \
             --type IOS_APP_STORE \
             --certificate-key=@file:"$RUNNER_TEMP/cert_key" \
