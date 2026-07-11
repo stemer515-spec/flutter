@@ -43,13 +43,25 @@ jobs:
 
       - name: Install Codemagic CLI tools
         run: |
+          brew update
           brew install pipx
-          pipx ensurepath
           pipx install codemagic-cli-tools
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Prepare iOS build directories
         run: |
           mkdir -p "$APP_DIR/build/ios/SourcePackages"
+
+      - name: Ensure iOS scaffold files exist
+        run: |
+          cd "$APP_DIR"
+          if [ ! -f ios/Podfile ]; then
+            flutter create . --platforms=ios --org com.simtrainingpartner --project-name personal_training_app
+          fi
+          if ! grep -q "^platform :ios" ios/Podfile; then
+            { echo "platform :ios, '13.0'"; cat ios/Podfile; } > ios/Podfile.tmp
+            mv ios/Podfile.tmp ios/Podfile
+          fi
 
       - name: Set up iOS signing
         run: |
