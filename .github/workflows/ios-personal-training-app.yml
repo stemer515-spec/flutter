@@ -24,6 +24,7 @@ jobs:
       APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
       APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APP_STORE_CONNECT_KEY_IDENTIFIER }}
       APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+      APP_STORE_CONNECT_CERTIFICATE_KEY: ${{ secrets.APP_STORE_CONNECT_CERTIFICATE_KEY }}
 
     steps:
       - name: Checkout
@@ -70,7 +71,11 @@ jobs:
       - name: Set up iOS signing
         run: |
           cd "$APP_DIR"
-          ssh-keygen -t rsa -b 2048 -m PEM -f "$RUNNER_TEMP/cert_key" -q -N ""
+          if [ -z "$APP_STORE_CONNECT_CERTIFICATE_KEY" ]; then
+            echo "Missing secret: APP_STORE_CONNECT_CERTIFICATE_KEY"
+            exit 1
+          fi
+          printf "%s" "$APP_STORE_CONNECT_CERTIFICATE_KEY" > "$RUNNER_TEMP/cert_key"
           keychain initialize
           app-store-connect fetch-signing-files \
             "$IOS_BUNDLE_ID" \
