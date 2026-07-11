@@ -50,6 +50,7 @@ jobs:
       - name: Build iOS IPA for App Store
         run: |
           cd "$APP_DIR"
+          flutter config --no-enable-swift-package-manager
           flutter build ipa \
             --release \
             --dart-define=APP_ENV=${{ inputs.app_env }} \
