@@ -15,9 +15,8 @@ on:
 jobs:
   build-ios:
     runs-on: macos-14
-    defaults:
-      run:
-        working-directory: app_repo/examples/personal_training_app
+    env:
+      APP_DIR: app_repo/examples/personal_training_app
 
     steps:
       - name: Checkout
@@ -30,8 +29,8 @@ jobs:
         run: |
           pwd
           ls -la
-          ls -la app_repo/examples/personal_training_app
-          test -f app_repo/examples/personal_training_app/pubspec.yaml
+          ls -la "$APP_DIR"
+          test -f "$APP_DIR/pubspec.yaml"
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -40,10 +39,13 @@ jobs:
           cache: true
 
       - name: Flutter pub get
-        run: flutter pub get
+        run: |
+          cd "$APP_DIR"
+          flutter pub get
 
       - name: Build iOS IPA for App Store
         run: |
+          cd "$APP_DIR"
           flutter build ipa \
             --release \
             --dart-define=APP_ENV=${{ inputs.app_env }} \
