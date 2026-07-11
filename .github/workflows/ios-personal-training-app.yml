@@ -25,9 +25,13 @@ jobs:
         with:
           ref: main
           path: app_repo
-          sparse-checkout: |
-            examples/personal_training_app
-          sparse-checkout-cone-mode: false
+
+      - name: Preflight app path
+        run: |
+          pwd
+          ls -la
+          ls -la app_repo/examples/personal_training_app
+          test -f app_repo/examples/personal_training_app/pubspec.yaml
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
