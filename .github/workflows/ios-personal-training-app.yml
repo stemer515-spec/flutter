@@ -17,13 +17,17 @@ jobs:
     runs-on: macos-14
     defaults:
       run:
-        working-directory: examples/personal_training_app
+        working-directory: app_repo/examples/personal_training_app
 
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
           ref: main
+          path: app_repo
+          sparse-checkout: |
+            examples/personal_training_app
+          sparse-checkout-cone-mode: false
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -50,5 +54,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ios-app-ipa-${{ inputs.app_env }}
-          path: build/ios/ipa/*.ipa
+          path: app_repo/examples/personal_training_app/build/ios/ipa/*.ipa
           if-no-files-found: error
