@@ -43,8 +43,10 @@ jobs:
 
       - name: Install Codemagic CLI tools
         run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install codemagic-cli-tools
+          python3 -m venv /tmp/codemagic-venv
+          /tmp/codemagic-venv/bin/pip install --upgrade pip
+          /tmp/codemagic-venv/bin/pip install codemagic-cli-tools
+          echo "/tmp/codemagic-venv/bin" >> "$GITHUB_PATH"
 
       - name: Prepare iOS build directories
         run: |
