@@ -38,6 +38,10 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Prepare iOS build directories
+        run: |
+          mkdir -p "$APP_DIR/build/ios/SourcePackages"
+
       - name: Flutter pub get
         run: |
           cd "$APP_DIR"
