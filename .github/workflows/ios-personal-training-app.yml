@@ -108,9 +108,14 @@ jobs:
         run: |
           cd "$APP_DIR"
           if [ -f lib/main.dart ]; then
+            # Hide FirebaseService from firebase_core and explicitly alias the app service.
             perl -0pi -e "s#import 'package:firebase_core/firebase_core.dart';#import 'package:firebase_core/firebase_core.dart' hide FirebaseService;#g" lib/main.dart
+            perl -0pi -e "s#import 'package:personal_training_app/utils/firebase_service.dart';#import 'package:personal_training_app/utils/firebase_service.dart' as app_firebase;#g" lib/main.dart
+            perl -0pi -e "s/(?<![A-Za-z0-9_\.])FirebaseService\./app_firebase.FirebaseService./g" lib/main.dart
             echo "==== Firebase imports after patch ===="
             grep -nE "firebase_core/firebase_core.dart|utils/firebase_service.dart" lib/main.dart || true
+            echo "==== FirebaseService usage after patch ===="
+            grep -n "FirebaseService\." lib/main.dart || true
           fi
 
       - name: Resolve CocoaPods dependencies
