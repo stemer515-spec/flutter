@@ -35,7 +35,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: master
+          ref: main
           path: app_repo
 
       - name: Set up Xcode
@@ -70,6 +70,14 @@ jobs:
       - name: Normalize iOS deployment target
         run: |
           cd "$APP_DIR"
+          # Ensure CocoaPods header behavior stays compatible with Flutter plugins.
+          sed -i '' '/^[[:space:]]*use_frameworks![[:space:]]*$/d' ios/Podfile
+          sed -i '' '/^[[:space:]]*use_modular_headers![[:space:]]*$/d' ios/Podfile
+          if ! grep -q "flutter_additional_ios_build_settings(target)" ios/Podfile; then
+            sed -i '' '/installer\.pods_project\.targets\.each do |target|/a\
+    flutter_additional_ios_build_settings(target)
+' ios/Podfile
+          fi
           sed -i '' "s/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]\+;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g" ios/Runner.xcodeproj/project.pbxproj
 
       - name: Set up iOS signing
