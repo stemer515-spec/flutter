@@ -130,6 +130,14 @@ jobs:
           cd ios
           pod repo update
           pod install --repo-update
+          echo "==== Patching health Swift header import ===="
+          for f in ".symlinks/plugins/health/ios/Classes/HealthPlugin.m" "$HOME/.pub-cache/hosted/pub.dev"/health-*/ios/Classes/HealthPlugin.m; do
+            if [ -f "$f" ]; then
+              perl -0pi -e "s/#import <health\/health-Swift\.h>/#if __has_include(<health\/health-Swift.h>)\\n#import <health\/health-Swift.h>\\n#elif __has_include(\"health-Swift.h\")\\n#import \"health-Swift.h\"\\n#else\\n#import <health-Swift.h>\\n#endif/g" "$f"
+              echo "Patched: $f"
+              grep -nE "health-Swift\.h|__has_include" "$f" || true
+            fi
+          done
           echo "==== Plugin symlink check ===="
           ls -la .symlinks/plugins | grep -E "cloud_firestore|firebase_core|firebase_auth" || true
           echo "==== cloud_firestore target support files ===="
