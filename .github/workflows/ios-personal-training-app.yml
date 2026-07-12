@@ -162,6 +162,34 @@ jobs:
             exit 1
           fi
 
+      - name: Summarize xcodebuild failures
+        if: always()
+        run: |
+          summary_log="$RUNNER_TEMP/xcodebuild-failure-summary.log"
+          : > "$summary_log"
+
+          for f in "$RUNNER_TEMP/xcodebuild-archive.log" "$RUNNER_TEMP/xcodebuild-export.log"; do
+            if [ -f "$f" ]; then
+              echo "==== $(basename "$f") ====" >> "$summary_log"
+              grep -niE "error:|error |fatal|exception|failed|module .* not found|PhaseScriptExecution failed" "$f" | head -n 120 >> "$summary_log" || true
+              echo >> "$summary_log"
+            fi
+          done
+
+          if [ -s "$summary_log" ]; then
+            echo "==== Extracted xcodebuild failure lines ===="
+            cat "$summary_log"
+            {
+              echo "## Extracted xcodebuild failure lines"
+              echo
+              echo '```text'
+              cat "$summary_log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No extracted xcodebuild failure lines were found."
+          fi
+
       - name: Upload xcodebuild logs
         if: always()
         uses: actions/upload-artifact@v4
