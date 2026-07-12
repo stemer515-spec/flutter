@@ -65,9 +65,16 @@ jobs:
             flutter create . --platforms=ios --org com.simtrainingpartner --project-name personal_training_app
           fi
           if ! grep -q "^platform :ios" ios/Podfile; then
-            { echo "platform :ios, '13.0'"; cat ios/Podfile; } > ios/Podfile.tmp
+            { echo "platform :ios, '15.0'"; cat ios/Podfile; } > ios/Podfile.tmp
             mv ios/Podfile.tmp ios/Podfile
+          else
+            sed -i '' "s/^platform :ios, '.*'/platform :ios, '15.0'/" ios/Podfile
           fi
+
+      - name: Normalize iOS deployment target
+        run: |
+          cd "$APP_DIR"
+          sed -i '' "s/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]\+;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g" ios/Runner.xcodeproj/project.pbxproj
 
       - name: Set up iOS signing
         run: |
