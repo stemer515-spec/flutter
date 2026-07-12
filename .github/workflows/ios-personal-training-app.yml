@@ -108,11 +108,6 @@ jobs:
         run: |
           cd "$APP_DIR"
           flutter config --no-enable-swift-package-manager
-          flutter build ios \
-            --release \
-            --no-codesign \
-            --dart-define=APP_ENV=$APP_ENV
-
           xcodebuild archive \
             -workspace "$APP_DIR/ios/Runner.xcworkspace" \
             -scheme Runner \
