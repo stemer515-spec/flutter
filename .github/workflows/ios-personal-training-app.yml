@@ -132,6 +132,9 @@ PY
           cd "$APP_DIR/ios"
           pod repo update
           pod install --repo-update
+          # Some transitive pods (for example BoringSSL-GRPC) may default to old
+          # deployment targets; normalize after install.
+          sed -i '' "s/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]\+;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g" Pods/Pods.xcodeproj/project.pbxproj
 
       - name: Build iOS IPA for App Store
         run: |
@@ -140,6 +143,7 @@ PY
           flutter build ipa \
             --release \
             --no-codesign \
+            --no-cocoapods \
             --dart-define=APP_ENV=${{ inputs.app_env }} \
             --export-options-plist=$HOME/export_options.plist
 
