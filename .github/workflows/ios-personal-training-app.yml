@@ -70,8 +70,11 @@ jobs:
       - name: Normalize iOS deployment target
         run: |
           cd "$APP_DIR"
-          # Ensure CocoaPods header behavior stays compatible with Flutter plugins.
-          sed -i '' '/^[[:space:]]*use_frameworks![[:space:]]*$/d' ios/Podfile
+          # Keep framework linkage so Swift bridge headers (for example health-Swift.h)
+          # are generated, but remove modular headers to avoid Flutter header issues.
+          if ! grep -q "^[[:space:]]*use_frameworks![[:space:]]*$" ios/Podfile; then
+            perl -0pi -e "s/target 'Runner' do/target 'Runner' do\\n  use_frameworks!/" ios/Podfile
+          fi
           sed -i '' '/^[[:space:]]*use_modular_headers![[:space:]]*$/d' ios/Podfile
           if ! grep -q "flutter_additional_ios_build_settings(target)" ios/Podfile; then
             perl -0pi -e "s/installer\\.pods_project\\.targets\\.each do \\|target\\|/installer.pods_project.targets.each do |target|\\n    flutter_additional_ios_build_settings(target)/" ios/Podfile
