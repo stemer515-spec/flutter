@@ -104,6 +104,13 @@ jobs:
           cd "$APP_DIR"
           flutter pub get
 
+      - name: Resolve FirebaseService import collision
+        run: |
+          cd "$APP_DIR"
+          if [ -f lib/main.dart ]; then
+            perl -0pi -e "s#import 'package:firebase_core/firebase_core.dart';#import 'package:firebase_core/firebase_core.dart' hide FirebaseService;#g" lib/main.dart
+          fi
+
       - name: Resolve CocoaPods dependencies
         run: |
           cd "$APP_DIR/ios"
