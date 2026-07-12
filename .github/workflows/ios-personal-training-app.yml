@@ -75,6 +75,29 @@ jobs:
           else
             sed -i '' "s/^platform :ios, '.*'/platform :ios, '15.0'/" ios/Podfile
           fi
+          if ! grep -q "post_install do |installer|" ios/Podfile; then
+            python3 - <<'PY'
+from pathlib import Path
+podfile = Path('ios/Podfile')
+content = podfile.read_text()
+insertion = """
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+    end
+  end
+end
+"""
+content = content.rstrip()
+if content.endswith('end'):
+    content = content[:-3].rstrip() + insertion + "\nend\n"
+else:
+    content += insertion + "\n"
+podfile.write_text(content)
+PY
+          fi
 
       - name: Normalize iOS deployment target
         run: |
