@@ -124,10 +124,13 @@ jobs:
           cd "$APP_DIR/ios"
           pod repo update
           pod install --repo-update
-          # In some CI/Xcode combinations, module import fallback fails for
-          # cloud_firestore in GeneratedPluginRegistrant. Prefer direct header.
+          echo "==== Firestore header locations in Pods ===="
+          find Pods -name FLTFirebaseFirestorePlugin.h -print || true
+          # In some CI/Xcode combinations, cloud_firestore import mode varies.
+          # Normalize to a resilient import chain in GeneratedPluginRegistrant.
           if [ -f Runner/GeneratedPluginRegistrant.m ]; then
             perl -0pi -e "s/#if __has_include\(<cloud_firestore\/FLTFirebaseFirestorePlugin\.h>\)\n#import <cloud_firestore\/FLTFirebaseFirestorePlugin\.h>\n#else\n\@import cloud_firestore;\n#endif/#import <cloud_firestore\/FLTFirebaseFirestorePlugin.h>/g" Runner/GeneratedPluginRegistrant.m
+            perl -0pi -e "s/#import <cloud_firestore\/FLTFirebaseFirestorePlugin\.h>/#if __has_include(<cloud_firestore\/FLTFirebaseFirestorePlugin.h>)\\n#import <cloud_firestore\/FLTFirebaseFirestorePlugin.h>\\n#elif __has_include(<FLTFirebaseFirestorePlugin.h>)\\n#import <FLTFirebaseFirestorePlugin.h>\\n#elif __has_include(\"FLTFirebaseFirestorePlugin.h\")\\n#import \"FLTFirebaseFirestorePlugin.h\"\\n#else\\n\@import cloud_firestore;\\n#endif/g" Runner/GeneratedPluginRegistrant.m
             echo "==== GeneratedPluginRegistrant cloud_firestore import ===="
             grep -nE "cloud_firestore|FLTFirebaseFirestorePlugin" Runner/GeneratedPluginRegistrant.m || true
           fi
