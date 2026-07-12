@@ -70,13 +70,7 @@ jobs:
       - name: Normalize iOS deployment target
         run: |
           cd "$APP_DIR"
-          # Keep framework linkage for Swift plugin headers but prefer static
-          # linkage, which is the most stable mode with FlutterFire pods.
-          perl -0pi -e "s/^[[:space:]]*use_frameworks!.*$/  use_frameworks! :linkage => :static/mg" ios/Podfile
-          if ! grep -q "^[[:space:]]*use_frameworks![[:space:]]*:linkage[[:space:]]*=>[[:space:]]*:static[[:space:]]*$" ios/Podfile; then
-            perl -0pi -e "s/target 'Runner' do/target 'Runner' do\\n  use_frameworks! :linkage => :static/" ios/Podfile
-          fi
-          sed -i '' '/^[[:space:]]*use_modular_headers![[:space:]]*$/d' ios/Podfile
+          # Keep Podfile linkage mode from source branch to avoid CI-only drift.
           if ! grep -q "flutter_additional_ios_build_settings(target)" ios/Podfile; then
             perl -0pi -e "s/installer\\.pods_project\\.targets\\.each do \\|target\\|/installer.pods_project.targets.each do |target|\\n    flutter_additional_ios_build_settings(target)/" ios/Podfile
           fi
@@ -134,14 +128,6 @@ jobs:
           ls -la "Pods/Target Support Files" | grep -i cloud_firestore || true
           echo "==== Firestore header locations in Pods ===="
           find Pods -name FLTFirebaseFirestorePlugin.h -print || true
-          # In some CI/Xcode combinations, cloud_firestore import mode varies.
-          # Normalize to a resilient import chain in GeneratedPluginRegistrant.
-          if [ -f Runner/GeneratedPluginRegistrant.m ]; then
-            perl -0pi -e "s/#if __has_include\(<cloud_firestore\/FLTFirebaseFirestorePlugin\.h>\)\n#import <cloud_firestore\/FLTFirebaseFirestorePlugin\.h>\n#else\n\@import cloud_firestore;\n#endif/#import <cloud_firestore\/FLTFirebaseFirestorePlugin.h>/g" Runner/GeneratedPluginRegistrant.m
-            perl -0pi -e "s/#import <cloud_firestore\/FLTFirebaseFirestorePlugin\.h>/#if __has_include(<cloud_firestore\/FLTFirebaseFirestorePlugin.h>)\\n#import <cloud_firestore\/FLTFirebaseFirestorePlugin.h>\\n#elif __has_include(<FLTFirebaseFirestorePlugin.h>)\\n#import <FLTFirebaseFirestorePlugin.h>\\n#elif __has_include(\"FLTFirebaseFirestorePlugin.h\")\\n#import \"FLTFirebaseFirestorePlugin.h\"\\n#else\\n\@import cloud_firestore;\\n#endif/g" Runner/GeneratedPluginRegistrant.m
-            echo "==== GeneratedPluginRegistrant cloud_firestore import ===="
-            grep -nE "cloud_firestore|FLTFirebaseFirestorePlugin" Runner/GeneratedPluginRegistrant.m || true
-          fi
           # Some transitive pods (for example BoringSSL-GRPC) may default to old
           # deployment targets; normalize after install.
           sed -i '' "s/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]\+;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g" Pods/Pods.xcodeproj/project.pbxproj
@@ -151,30 +137,14 @@ jobs:
           set -euo pipefail
           cd "$APP_DIR"
           flutter config --no-enable-swift-package-manager
-          if ! xcodebuild archive \
-            -workspace "ios/Runner.xcworkspace" \
-            -scheme Runner \
-            -configuration Release \
-            -destination 'generic/platform=iOS' \
-            -archivePath "build/ios/archive/Runner.xcarchive" \
-            -allowProvisioningUpdates \
-            | tee "$RUNNER_TEMP/xcodebuild-archive.log"; then
-            echo "==== xcodebuild archive error lines ===="
-            grep -niE "error:|error |fatal|exception|failed" "$RUNNER_TEMP/xcodebuild-archive.log" || true
-            echo "==== xcodebuild archive tail ===="
-            tail -n 600 "$RUNNER_TEMP/xcodebuild-archive.log" || true
-            exit 1
-          fi
-
-          if ! xcodebuild -exportArchive \
-            -archivePath "build/ios/archive/Runner.xcarchive" \
-            -exportPath "build/ios/ipa" \
-            -exportOptionsPlist "$HOME/export_options.plist" \
-            | tee "$RUNNER_TEMP/xcodebuild-export.log"; then
-            echo "==== xcodebuild export error lines ===="
-            grep -niE "error:|error |fatal|exception|failed" "$RUNNER_TEMP/xcodebuild-export.log" || true
-            echo "==== xcodebuild export tail ===="
-            tail -n 600 "$RUNNER_TEMP/xcodebuild-export.log" || true
+          if ! flutter build ipa \
+            --release \
+            --export-options-plist="$HOME/export_options.plist" \
+            | tee "$RUNNER_TEMP/flutter-build-ipa.log"; then
+            echo "==== flutter build ipa error lines ===="
+            grep -niE "error:|error |fatal|exception|failed|module .* not found|PhaseScriptExecution failed" "$RUNNER_TEMP/flutter-build-ipa.log" || true
+            echo "==== flutter build ipa tail ===="
+            tail -n 600 "$RUNNER_TEMP/flutter-build-ipa.log" || true
             exit 1
           fi
 
@@ -184,7 +154,7 @@ jobs:
           summary_log="$RUNNER_TEMP/xcodebuild-failure-summary.log"
           : > "$summary_log"
 
-          for f in "$RUNNER_TEMP/xcodebuild-archive.log" "$RUNNER_TEMP/xcodebuild-export.log"; do
+          for f in "$RUNNER_TEMP/flutter-build-ipa.log" "$RUNNER_TEMP/xcodebuild-archive.log" "$RUNNER_TEMP/xcodebuild-export.log"; do
             if [ -f "$f" ]; then
               echo "==== $(basename "$f") ====" >> "$summary_log"
               grep -niE "error:|error |fatal|exception|failed|module .* not found|PhaseScriptExecution failed" "$f" | head -n 120 >> "$summary_log" || true
@@ -212,6 +182,7 @@ jobs:
         with:
           name: xcodebuild-logs-${{ env.APP_ENV }}
           path: |
+            ${{ runner.temp }}/flutter-build-ipa.log
             ${{ runner.temp }}/xcodebuild-archive.log
             ${{ runner.temp }}/xcodebuild-export.log
           if-no-files-found: ignore
