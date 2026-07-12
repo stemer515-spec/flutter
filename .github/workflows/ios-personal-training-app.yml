@@ -133,7 +133,6 @@ jobs:
           flutter build ipa \
             --release \
             --no-codesign \
-            --no-cocoapods \
             --dart-define=APP_ENV=$APP_ENV \
             --export-options-plist=$HOME/export_options.plist
 
