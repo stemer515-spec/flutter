@@ -111,8 +111,14 @@ jobs:
           flutter config --no-enable-swift-package-manager
           flutter build ipa \
             --release \
+            --no-codesign \
             --dart-define=APP_ENV=${{ inputs.app_env }} \
             --export-options-plist=$HOME/export_options.plist
+
+          xcodebuild -exportArchive \
+            -archivePath "$APP_DIR/build/ios/archive/Runner.xcarchive" \
+            -exportPath "$APP_DIR/build/ios/ipa" \
+            -exportOptionsPlist "$HOME/export_options.plist"
 
       - name: Upload iOS IPA artifact
         uses: actions/upload-artifact@v4
