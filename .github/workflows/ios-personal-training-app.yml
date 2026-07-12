@@ -20,6 +20,7 @@ jobs:
     runs-on: macos-15
     env:
       APP_DIR: app_repo/examples/personal_training_app
+      APP_ENV: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.app_env || 'production' }}
       IOS_BUNDLE_ID: com.simtrainingpartner.simtrainingpartner
       APPLE_TEAM_ID: 5QHDS9AQFB
       LANG: en_US.UTF-8
@@ -147,7 +148,7 @@ PY
             --release \
             --no-codesign \
             --no-cocoapods \
-            --dart-define=APP_ENV=${{ inputs.app_env }} \
+            --dart-define=APP_ENV=$APP_ENV \
             --export-options-plist=$HOME/export_options.plist
 
           xcodebuild -exportArchive \
@@ -158,6 +159,6 @@ PY
       - name: Upload iOS IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ios-app-ipa-${{ inputs.app_env }}
+          name: ios-app-ipa-${{ env.APP_ENV }}
           path: app_repo/examples/personal_training_app/build/ios/ipa/*.ipa
           if-no-files-found: error
