@@ -70,15 +70,13 @@ jobs:
       - name: Normalize iOS deployment target
         run: |
           cd "$APP_DIR"
-          # Keep framework linkage so Swift bridge headers (for example health-Swift.h)
-          # are generated, and ensure modular headers so plugin modules (for example
-          # cloud_firestore) can be imported by GeneratedPluginRegistrant.
-          if ! grep -q "^[[:space:]]*use_frameworks![[:space:]]*$" ios/Podfile; then
-            perl -0pi -e "s/target 'Runner' do/target 'Runner' do\\n  use_frameworks!/" ios/Podfile
+          # Keep framework linkage for Swift plugin headers but prefer static
+          # linkage, which is the most stable mode with FlutterFire pods.
+          perl -0pi -e "s/^[[:space:]]*use_frameworks!.*$/  use_frameworks! :linkage => :static/mg" ios/Podfile
+          if ! grep -q "^[[:space:]]*use_frameworks![[:space:]]*:linkage[[:space:]]*=>[[:space:]]*:static[[:space:]]*$" ios/Podfile; then
+            perl -0pi -e "s/target 'Runner' do/target 'Runner' do\\n  use_frameworks! :linkage => :static/" ios/Podfile
           fi
-          if ! grep -q "^[[:space:]]*use_modular_headers![[:space:]]*$" ios/Podfile; then
-            perl -0pi -e "s/target 'Runner' do/target 'Runner' do\\n  use_modular_headers!/" ios/Podfile
-          fi
+          sed -i '' '/^[[:space:]]*use_modular_headers![[:space:]]*$/d' ios/Podfile
           if ! grep -q "flutter_additional_ios_build_settings(target)" ios/Podfile; then
             perl -0pi -e "s/installer\\.pods_project\\.targets\\.each do \\|target\\|/installer.pods_project.targets.each do |target|\\n    flutter_additional_ios_build_settings(target)/" ios/Podfile
           fi
