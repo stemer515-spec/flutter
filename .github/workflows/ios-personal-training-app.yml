@@ -124,6 +124,13 @@ jobs:
           cd "$APP_DIR/ios"
           pod repo update
           pod install --repo-update
+          # In some CI/Xcode combinations, module import fallback fails for
+          # cloud_firestore in GeneratedPluginRegistrant. Prefer direct header.
+          if [ -f Runner/GeneratedPluginRegistrant.m ]; then
+            perl -0pi -e "s/#if __has_include\(<cloud_firestore\/FLTFirebaseFirestorePlugin\.h>\)\n#import <cloud_firestore\/FLTFirebaseFirestorePlugin\.h>\n#else\n\@import cloud_firestore;\n#endif/#import <cloud_firestore\/FLTFirebaseFirestorePlugin.h>/g" Runner/GeneratedPluginRegistrant.m
+            echo "==== GeneratedPluginRegistrant cloud_firestore import ===="
+            grep -nE "cloud_firestore|FLTFirebaseFirestorePlugin" Runner/GeneratedPluginRegistrant.m || true
+          fi
           # Some transitive pods (for example BoringSSL-GRPC) may default to old
           # deployment targets; normalize after install.
           sed -i '' "s/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]\+;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g" Pods/Pods.xcodeproj/project.pbxproj
