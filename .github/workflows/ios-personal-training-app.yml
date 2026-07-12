@@ -109,6 +109,8 @@ jobs:
           cd "$APP_DIR"
           if [ -f lib/main.dart ]; then
             perl -0pi -e "s#import 'package:firebase_core/firebase_core.dart';#import 'package:firebase_core/firebase_core.dart' hide FirebaseService;#g" lib/main.dart
+            echo "==== Firebase imports after patch ===="
+            grep -nE "firebase_core/firebase_core.dart|utils/firebase_service.dart" lib/main.dart || true
           fi
 
       - name: Resolve CocoaPods dependencies
@@ -134,9 +136,9 @@ jobs:
             -allowProvisioningUpdates \
             | tee "$RUNNER_TEMP/xcodebuild-archive.log"; then
             echo "==== xcodebuild archive error lines ===="
-            grep -n "error:" "$RUNNER_TEMP/xcodebuild-archive.log" || true
+            grep -niE "error:|error |fatal|exception|failed" "$RUNNER_TEMP/xcodebuild-archive.log" || true
             echo "==== xcodebuild archive tail ===="
-            tail -n 200 "$RUNNER_TEMP/xcodebuild-archive.log" || true
+            tail -n 600 "$RUNNER_TEMP/xcodebuild-archive.log" || true
             exit 1
           fi
 
@@ -146,11 +148,21 @@ jobs:
             -exportOptionsPlist "$HOME/export_options.plist" \
             | tee "$RUNNER_TEMP/xcodebuild-export.log"; then
             echo "==== xcodebuild export error lines ===="
-            grep -n "error:" "$RUNNER_TEMP/xcodebuild-export.log" || true
+            grep -niE "error:|error |fatal|exception|failed" "$RUNNER_TEMP/xcodebuild-export.log" || true
             echo "==== xcodebuild export tail ===="
-            tail -n 200 "$RUNNER_TEMP/xcodebuild-export.log" || true
+            tail -n 600 "$RUNNER_TEMP/xcodebuild-export.log" || true
             exit 1
           fi
+
+      - name: Upload xcodebuild logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-logs-${{ env.APP_ENV }}
+          path: |
+            ${{ runner.temp }}/xcodebuild-archive.log
+            ${{ runner.temp }}/xcodebuild-export.log
+          if-no-files-found: ignore
 
       - name: Upload iOS IPA artifact
         uses: actions/upload-artifact@v4
