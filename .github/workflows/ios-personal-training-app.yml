@@ -151,8 +151,10 @@ jobs:
             | tee "$RUNNER_TEMP/flutter-build-ipa.log"; then
             echo "==== flutter build ipa error lines ===="
             grep -niE "error:|error |fatal|exception|failed|module .* not found|PhaseScriptExecution failed" "$RUNNER_TEMP/flutter-build-ipa.log" || true
+            echo "==== CocoaPods explicit failure markers ===="
+            grep -niE "^\[!\]|pod install|pod setup|fatal:|RPC failed|Could not|Unable to|SSL|network|timeout" "$RUNNER_TEMP/flutter-build-ipa.log" | tail -n 200 || true
             echo "==== CocoaPods context from flutter build ipa ===="
-            awk 'BEGIN{show=0;count=0} /Error output from CocoaPods:/{show=1;count=0} show{print;count++} show && count>=120{show=0}' "$RUNNER_TEMP/flutter-build-ipa.log" || true
+            awk 'BEGIN{show=0;count=0} /Error output from CocoaPods:/{show=1;count=0} show{print;count++} show && count>=1500{show=0}' "$RUNNER_TEMP/flutter-build-ipa.log" || true
             echo "==== flutter build ipa tail ===="
             tail -n 600 "$RUNNER_TEMP/flutter-build-ipa.log" || true
             exit 1
@@ -169,8 +171,10 @@ jobs:
               echo "==== $(basename "$f") ====" >> "$summary_log"
               grep -niE "error:|error |fatal|exception|failed|module .* not found|PhaseScriptExecution failed" "$f" | head -n 120 >> "$summary_log" || true
               if [ "$(basename "$f")" = "flutter-build-ipa.log" ]; then
+                echo "---- CocoaPods explicit failure markers ----" >> "$summary_log"
+                grep -niE "^\[!\]|pod install|pod setup|fatal:|RPC failed|Could not|Unable to|SSL|network|timeout" "$f" | tail -n 200 >> "$summary_log" || true
                 echo "---- CocoaPods context ----" >> "$summary_log"
-                awk 'BEGIN{show=0;count=0} /Error output from CocoaPods:/{show=1;count=0} show{print;count++} show && count>=120{show=0}' "$f" >> "$summary_log" || true
+                awk 'BEGIN{show=0;count=0} /Error output from CocoaPods:/{show=1;count=0} show{print;count++} show && count>=1500{show=0}' "$f" >> "$summary_log" || true
               fi
               echo >> "$summary_log"
             fi
