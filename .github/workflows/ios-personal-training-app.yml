@@ -106,20 +106,35 @@ jobs:
 
       - name: Build iOS IPA for App Store
         run: |
+          set -euo pipefail
           cd "$APP_DIR"
           flutter config --no-enable-swift-package-manager
-          xcodebuild archive \
+          if ! xcodebuild archive \
             -workspace "ios/Runner.xcworkspace" \
             -scheme Runner \
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "build/ios/archive/Runner.xcarchive" \
-            CODE_SIGNING_ALLOWED=NO
+            -allowProvisioningUpdates \
+            | tee "$RUNNER_TEMP/xcodebuild-archive.log"; then
+            echo "==== xcodebuild archive error lines ===="
+            grep -n "error:" "$RUNNER_TEMP/xcodebuild-archive.log" || true
+            echo "==== xcodebuild archive tail ===="
+            tail -n 200 "$RUNNER_TEMP/xcodebuild-archive.log" || true
+            exit 1
+          fi
 
-          xcodebuild -exportArchive \
+          if ! xcodebuild -exportArchive \
             -archivePath "build/ios/archive/Runner.xcarchive" \
             -exportPath "build/ios/ipa" \
-            -exportOptionsPlist "$HOME/export_options.plist"
+            -exportOptionsPlist "$HOME/export_options.plist" \
+            | tee "$RUNNER_TEMP/xcodebuild-export.log"; then
+            echo "==== xcodebuild export error lines ===="
+            grep -n "error:" "$RUNNER_TEMP/xcodebuild-export.log" || true
+            echo "==== xcodebuild export tail ===="
+            tail -n 200 "$RUNNER_TEMP/xcodebuild-export.log" || true
+            exit 1
+          fi
 
       - name: Upload iOS IPA artifact
         uses: actions/upload-artifact@v4
