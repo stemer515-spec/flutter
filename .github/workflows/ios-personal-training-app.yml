@@ -154,7 +154,9 @@ jobs:
             -allowProvisioningUpdates \
             | tee "$RUNNER_TEMP/xcodebuild-archive.log"; then
             echo "==== xcodebuild archive error lines ===="
-            grep -niE "error:|error |fatal|exception|failed|module .* not found|PhaseScriptExecution failed" "$RUNNER_TEMP/xcodebuild-archive.log" || true
+            grep -niE "(^|[^A-Za-z])(fatal error:|error:|\*\* ARCHIVE FAILED \*\*|Command PhaseScriptExecution failed)" "$RUNNER_TEMP/xcodebuild-archive.log" || true
+            echo "==== xcodebuild archive failure context ===="
+            awk 'BEGIN{p=0} /\*\* ARCHIVE FAILED \*\*/{p=120} p>0{print; p--}' "$RUNNER_TEMP/xcodebuild-archive.log" || true
             echo "==== xcodebuild archive tail ===="
             tail -n 600 "$RUNNER_TEMP/xcodebuild-archive.log" || true
             exit 1
@@ -166,7 +168,9 @@ jobs:
             -exportOptionsPlist "$HOME/export_options.plist" \
             | tee "$RUNNER_TEMP/xcodebuild-export.log"; then
             echo "==== xcodebuild export error lines ===="
-            grep -niE "error:|error |fatal|exception|failed|module .* not found|PhaseScriptExecution failed" "$RUNNER_TEMP/xcodebuild-export.log" || true
+            grep -niE "(^|[^A-Za-z])(fatal error:|error:|\*\* EXPORT FAILED \*\*|Command PhaseScriptExecution failed)" "$RUNNER_TEMP/xcodebuild-export.log" || true
+            echo "==== xcodebuild export failure context ===="
+            awk 'BEGIN{p=0} /\*\* EXPORT FAILED \*\*/{p=120} p>0{print; p--}' "$RUNNER_TEMP/xcodebuild-export.log" || true
             echo "==== xcodebuild export tail ===="
             tail -n 600 "$RUNNER_TEMP/xcodebuild-export.log" || true
             exit 1
@@ -181,7 +185,8 @@ jobs:
           for f in "$RUNNER_TEMP/xcodebuild-archive.log" "$RUNNER_TEMP/xcodebuild-export.log"; do
             if [ -f "$f" ]; then
               echo "==== $(basename "$f") ====" >> "$summary_log"
-              grep -niE "error:|error |fatal|exception|failed|module .* not found|PhaseScriptExecution failed" "$f" | head -n 120 >> "$summary_log" || true
+              grep -niE "(^|[^A-Za-z])(fatal error:|error:|\*\* ARCHIVE FAILED \*\*|\*\* EXPORT FAILED \*\*|Command PhaseScriptExecution failed)" "$f" | head -n 160 >> "$summary_log" || true
+              awk 'BEGIN{p=0} /\*\* ARCHIVE FAILED \*\*/{p=120} /\*\* EXPORT FAILED \*\*/{p=120} p>0{print; p--}' "$f" >> "$summary_log" || true
               echo >> "$summary_log"
             fi
           done
