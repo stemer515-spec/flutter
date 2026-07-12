@@ -109,16 +109,16 @@ jobs:
           cd "$APP_DIR"
           flutter config --no-enable-swift-package-manager
           xcodebuild archive \
-            -workspace "$APP_DIR/ios/Runner.xcworkspace" \
+            -workspace "ios/Runner.xcworkspace" \
             -scheme Runner \
             -configuration Release \
             -destination 'generic/platform=iOS' \
-            -archivePath "$APP_DIR/build/ios/archive/Runner.xcarchive" \
+            -archivePath "build/ios/archive/Runner.xcarchive" \
             CODE_SIGNING_ALLOWED=NO
 
           xcodebuild -exportArchive \
-            -archivePath "$APP_DIR/build/ios/archive/Runner.xcarchive" \
-            -exportPath "$APP_DIR/build/ios/ipa" \
+            -archivePath "build/ios/archive/Runner.xcarchive" \
+            -exportPath "build/ios/ipa" \
             -exportOptionsPlist "$HOME/export_options.plist"
 
       - name: Upload iOS IPA artifact
