@@ -119,6 +119,14 @@ jobs:
           # Ensure iOS plugin podspec symlinks and generated configs exist before pod install.
           flutter build ios --config-only --no-codesign
 
+          # FlutterGeneratedPluginSwiftPackage may default to iOS 13 in CI, while
+          # Firebase Swift package products now require iOS 15.
+          find ios -path "*FlutterGeneratedPluginSwiftPackage*/Package.swift" -type f -print | while read -r pkg; do
+            sed -i '' -E "s/\.iOS\(\"13\.0\"\)/.iOS(\"15.0\")/g; s/\.iOS\(\.v13\)/.iOS(.v15)/g" "$pkg"
+            echo "==== Patched Swift package platform in $pkg ===="
+            grep -nE "platforms|\.iOS" "$pkg" || true
+          done
+
           cd ios
           pod repo update
           pod install --repo-update
