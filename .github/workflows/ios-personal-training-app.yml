@@ -108,11 +108,19 @@ jobs:
         run: |
           cd "$APP_DIR"
           flutter config --no-enable-swift-package-manager
-          flutter build ipa \
+          flutter build ios \
             --release \
             --no-codesign \
-            --dart-define=APP_ENV=$APP_ENV \
-            --export-options-plist=$HOME/export_options.plist
+            --no-cocoapods \
+            --dart-define=APP_ENV=$APP_ENV
+
+          xcodebuild archive \
+            -workspace "$APP_DIR/ios/Runner.xcworkspace" \
+            -scheme Runner \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$APP_DIR/build/ios/archive/Runner.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO
 
           xcodebuild -exportArchive \
             -archivePath "$APP_DIR/build/ios/archive/Runner.xcarchive" \
