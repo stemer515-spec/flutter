@@ -14,6 +14,14 @@ on:
         options:
           - production
           - staging
+      upload_to_testflight:
+        description: Upload IPA to TestFlight after successful build
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 jobs:
   build-ios:
@@ -30,7 +38,7 @@ jobs:
       APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APP_STORE_CONNECT_KEY_IDENTIFIER }}
       APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
       APP_STORE_CONNECT_CERTIFICATE_KEY: ${{ secrets.APP_STORE_CONNECT_CERTIFICATE_KEY }}
-      UPLOAD_TO_TESTFLIGHT: ${{ secrets.UPLOAD_TO_TESTFLIGHT }}
+      UPLOAD_TO_TESTFLIGHT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.upload_to_testflight || secrets.UPLOAD_TO_TESTFLIGHT }}
 
     steps:
       - name: Checkout
@@ -230,6 +238,15 @@ jobs:
           name: ios-app-ipa-${{ env.APP_ENV }}
           path: app_repo/examples/personal_training_app/build/ios/ipa/*.ipa
           if-no-files-found: error
+
+      - name: Report TestFlight upload mode
+        run: |
+          echo "UPLOAD_TO_TESTFLIGHT=${UPLOAD_TO_TESTFLIGHT:-unset}"
+          if [ "${UPLOAD_TO_TESTFLIGHT:-false}" = "true" ]; then
+            echo "TestFlight upload is ENABLED for this run."
+          else
+            echo "TestFlight upload is DISABLED for this run."
+          fi
 
       - name: Upload IPA to TestFlight
         if: ${{ env.UPLOAD_TO_TESTFLIGHT == 'true' }}
