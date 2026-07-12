@@ -35,7 +35,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: main
+          ref: master
           path: app_repo
 
       - name: Set up Xcode
