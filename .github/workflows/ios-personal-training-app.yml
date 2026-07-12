@@ -14,7 +14,7 @@ on:
 
 jobs:
   build-ios:
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       APP_DIR: app_repo/examples/personal_training_app
       IOS_BUNDLE_ID: com.simtrainingpartner.simtrainingpartner
@@ -33,6 +33,11 @@ jobs:
         with:
           ref: main
           path: app_repo
+
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
 
       - name: Preflight app path
         run: |
