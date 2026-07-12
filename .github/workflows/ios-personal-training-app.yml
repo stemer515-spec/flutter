@@ -30,6 +30,7 @@ jobs:
       APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APP_STORE_CONNECT_KEY_IDENTIFIER }}
       APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
       APP_STORE_CONNECT_CERTIFICATE_KEY: ${{ secrets.APP_STORE_CONNECT_CERTIFICATE_KEY }}
+      UPLOAD_TO_TESTFLIGHT: ${{ secrets.UPLOAD_TO_TESTFLIGHT }}
 
     steps:
       - name: Checkout
@@ -229,3 +230,17 @@ jobs:
           name: ios-app-ipa-${{ env.APP_ENV }}
           path: app_repo/examples/personal_training_app/build/ios/ipa/*.ipa
           if-no-files-found: error
+
+      - name: Upload IPA to TestFlight
+        if: ${{ env.UPLOAD_TO_TESTFLIGHT == 'true' }}
+        run: |
+          cd "$APP_DIR"
+          ipa_path=$(ls build/ios/ipa/*.ipa | head -n 1)
+          if [ -z "$ipa_path" ]; then
+            echo "No IPA found to upload."
+            exit 1
+          fi
+
+          echo "Uploading $ipa_path to App Store Connect..."
+          app-store-connect publish \
+            --path "$ipa_path"
