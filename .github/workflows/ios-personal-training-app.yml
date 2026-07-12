@@ -121,9 +121,17 @@ jobs:
 
       - name: Resolve CocoaPods dependencies
         run: |
-          cd "$APP_DIR/ios"
+          cd "$APP_DIR"
+          # Ensure iOS plugin podspec symlinks and generated configs exist before pod install.
+          flutter build ios --config-only --no-codesign
+
+          cd ios
           pod repo update
           pod install --repo-update
+          echo "==== Plugin symlink check ===="
+          ls -la .symlinks/plugins | grep -E "cloud_firestore|firebase_core|firebase_auth" || true
+          echo "==== cloud_firestore target support files ===="
+          ls -la "Pods/Target Support Files" | grep -i cloud_firestore || true
           echo "==== Firestore header locations in Pods ===="
           find Pods -name FLTFirebaseFirestorePlugin.h -print || true
           # In some CI/Xcode combinations, cloud_firestore import mode varies.
