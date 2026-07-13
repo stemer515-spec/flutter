@@ -35,7 +35,7 @@ jobs:
       LC_ALL: en_US.UTF-8
       COCOAPODS_DISABLE_STATS: "true"
       APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-      APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APP_STORE_CONNECT_KEY_IDENTIFIER || secrets.APPLE_STORE_CONNECT_API_KEY_ID }}
+      APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APPLE_STORE_CONNECT_API_KEY_ID || secrets.APP_STORE_CONNECT_KEY_IDENTIFIER }}
       APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
       APPLE_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APPLE_STORE_CONNECT_API_KEY_BASE64 }}
       UPLOAD_TO_TESTFLIGHT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.upload_to_testflight || secrets.UPLOAD_TO_TESTFLIGHT }}
@@ -117,16 +117,32 @@ jobs:
           fi
 
           key_path="$RUNNER_TEMP/AuthKey_${APP_STORE_CONNECT_KEY_IDENTIFIER}.p8"
+          valid_key=false
           if [ -n "${APPLE_STORE_CONNECT_API_KEY_BASE64:-}" ]; then
-            printf "%s" "$APPLE_STORE_CONNECT_API_KEY_BASE64" | base64 --decode > "$key_path"
-          elif [ -n "${APP_STORE_CONNECT_PRIVATE_KEY:-}" ]; then
-            printf "%s" "$APP_STORE_CONNECT_PRIVATE_KEY" > "$key_path"
-          else
-            echo "Missing secret: APPLE_STORE_CONNECT_API_KEY_BASE64 or APP_STORE_CONNECT_PRIVATE_KEY"
+            if printf "%s" "$APPLE_STORE_CONNECT_API_KEY_BASE64" | base64 --decode > "$key_path" 2>/dev/null; then
+              if grep -q "BEGIN PRIVATE KEY" "$key_path"; then
+                valid_key=true
+              fi
+            fi
+          fi
+
+          if [ "$valid_key" != "true" ] && [ -n "${APP_STORE_CONNECT_PRIVATE_KEY:-}" ]; then
+            printf "%s" "$APP_STORE_CONNECT_PRIVATE_KEY" | sed 's/\\n/\n/g' > "$key_path"
+            if grep -q "BEGIN PRIVATE KEY" "$key_path"; then
+              valid_key=true
+            fi
+          fi
+
+          if [ "$valid_key" != "true" ]; then
+            echo "Unable to build a valid .p8 key from APPLE_STORE_CONNECT_API_KEY_BASE64 or APP_STORE_CONNECT_PRIVATE_KEY"
             exit 1
           fi
 
           chmod 600 "$key_path"
+          if ! openssl pkey -in "$key_path" -noout >/dev/null 2>&1; then
+            echo "Generated key file is not a valid private key"
+            exit 1
+          fi
           echo "APP_STORE_CONNECT_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
       - name: Flutter pub get
