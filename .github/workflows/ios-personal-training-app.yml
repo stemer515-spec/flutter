@@ -205,15 +205,17 @@ jobs:
       - name: Flutter pub get
         run: |
           cd "$APP_DIR"
-          # Keep FlutterFire packages on a compatible set in CI to avoid
+          # Keep FlutterFire package constraints coherent in CI to avoid
           # mixed transitive versions (for example missing FirebasePlugin type).
-          flutter pub upgrade \
+          flutter pub add \
             firebase_core \
             firebase_auth \
             firebase_database \
             firebase_messaging \
             firebase_app_check || true
           flutter pub get
+          echo "==== Resolved Firebase package versions ===="
+          flutter pub deps | grep -E "firebase_(core|auth|database|messaging|app_check)( |$)" || true
 
       - name: Resolve FirebaseService import collision
         run: |
