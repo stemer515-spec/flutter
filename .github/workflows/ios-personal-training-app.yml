@@ -38,6 +38,7 @@ jobs:
       APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APPLE_STORE_CONNECT_API_KEY_ID }}
       APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
       APPLE_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APPLE_STORE_CONNECT_API_KEY_BASE64 }}
+      APP_STORE_CONNECT_CERTIFICATE_KEY: ${{ secrets.APP_STORE_CONNECT_CERTIFICATE_KEY }}
       UPLOAD_TO_TESTFLIGHT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.upload_to_testflight || secrets.UPLOAD_TO_TESTFLIGHT }}
 
     steps:
@@ -155,6 +156,15 @@ jobs:
         run: |
           set -euo pipefail
           cd "$APP_DIR"
+          if [ -z "${APP_STORE_CONNECT_CERTIFICATE_KEY:-}" ]; then
+            echo "Missing secret: APP_STORE_CONNECT_CERTIFICATE_KEY"
+            echo "This must be the Apple Distribution certificate private key used by Codemagic to create or save signing certificates."
+            exit 1
+          fi
+
+          cert_key_path="$RUNNER_TEMP/distribution_certificate.key"
+          printf "%s" "$APP_STORE_CONNECT_CERTIFICATE_KEY" | sed 's/\\n/\n/g' > "$cert_key_path"
+
           keychain initialize
           app-store-connect fetch-signing-files \
             "$IOS_BUNDLE_ID" \
@@ -162,7 +172,8 @@ jobs:
             --type IOS_APP_STORE \
             --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
             --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
-            --private-key "@file:$APP_STORE_CONNECT_API_KEY_PATH"
+            --private-key "@file:$APP_STORE_CONNECT_API_KEY_PATH" \
+            --certificate-key "@file:$cert_key_path"
           keychain add-certificates -A
           xcode-project use-profiles \
             --project "$APP_DIR/ios/Runner.xcodeproj" \
