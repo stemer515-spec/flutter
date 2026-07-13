@@ -151,6 +151,25 @@ jobs:
           fi
           echo "APP_STORE_CONNECT_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
+      - name: Fetch App Store signing files
+        run: |
+          set -euo pipefail
+          cd "$APP_DIR"
+          keychain initialize
+          app-store-connect fetch-signing-files \
+            "$IOS_BUNDLE_ID" \
+            --platform IOS \
+            --type IOS_APP_STORE \
+            --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
+            --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
+            --private-key "@file:$APP_STORE_CONNECT_API_KEY_PATH"
+          keychain add-certificates -A
+          xcode-project use-profiles \
+            --project "$APP_DIR/ios/Runner.xcodeproj" \
+            --archive-method app-store \
+            --export-options-plist "$HOME/export_options.plist" \
+            --code-signing-setup-verbose-logging
+
       - name: Flutter pub get
         run: |
           cd "$APP_DIR"
@@ -226,12 +245,8 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "build/ios/archive/Runner.xcarchive" \
-            -authenticationKeyPath "$APP_STORE_CONNECT_API_KEY_PATH" \
-            -authenticationKeyID "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
-            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
-            -allowProvisioningUpdates \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_STYLE=Manual \
             2>&1 | tee "$RUNNER_TEMP/xcodebuild-archive.log"; then
             echo "==== xcodebuild archive error lines ===="
             grep -niE "(^|[^A-Za-z])(fatal error:|error:|\*\* ARCHIVE FAILED \*\*|Command PhaseScriptExecution failed)" "$RUNNER_TEMP/xcodebuild-archive.log" || true
@@ -246,11 +261,8 @@ jobs:
             -archivePath "build/ios/archive/Runner.xcarchive" \
             -exportPath "build/ios/ipa" \
             -exportOptionsPlist "$HOME/export_options.plist" \
-            -authenticationKeyPath "$APP_STORE_CONNECT_API_KEY_PATH" \
-            -authenticationKeyID "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
-            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_STYLE=Manual \
             2>&1 | tee "$RUNNER_TEMP/xcodebuild-export.log"; then
             echo "==== xcodebuild export error lines ===="
             grep -niE "(^|[^A-Za-z])(fatal error:|error:|\*\* EXPORT FAILED \*\*|Command PhaseScriptExecution failed)" "$RUNNER_TEMP/xcodebuild-export.log" || true
