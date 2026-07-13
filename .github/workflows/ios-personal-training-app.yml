@@ -36,6 +36,7 @@ jobs:
       COCOAPODS_DISABLE_STATS: "true"
       APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
       APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APPLE_STORE_CONNECT_API_KEY_ID }}
+      APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
       APPLE_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APPLE_STORE_CONNECT_API_KEY_BASE64 }}
       APP_STORE_CONNECT_CERTIFICATE_KEY: ${{ secrets.APP_STORE_CONNECT_CERTIFICATE_KEY }}
       UPLOAD_TO_TESTFLIGHT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.upload_to_testflight || secrets.UPLOAD_TO_TESTFLIGHT }}
@@ -121,21 +122,33 @@ jobs:
             echo "Missing secret: APPLE_STORE_CONNECT_API_KEY_ID"
             exit 1
           fi
-          if [ -z "${APPLE_STORE_CONNECT_API_KEY_BASE64:-}" ]; then
-            echo "Missing secret: APPLE_STORE_CONNECT_API_KEY_BASE64"
+          if [ -z "${APPLE_STORE_CONNECT_API_KEY_BASE64:-}" ] && [ -z "${APP_STORE_CONNECT_PRIVATE_KEY:-}" ]; then
+            echo "Missing key secret: set APPLE_STORE_CONNECT_API_KEY_BASE64 or APP_STORE_CONNECT_PRIVATE_KEY"
             exit 1
           fi
 
           key_path="$RUNNER_TEMP/AuthKey_${APP_STORE_CONNECT_KEY_IDENTIFIER}.p8"
-          # Accept either base64-encoded file bytes or raw PEM text in the secret.
-          if printf "%s" "$APPLE_STORE_CONNECT_API_KEY_BASE64" | grep -q "BEGIN PRIVATE KEY"; then
+          key_source=""
+
+          # Prefer explicitly named raw private key secret if present.
+          if [ -n "${APP_STORE_CONNECT_PRIVATE_KEY:-}" ] && printf "%s" "$APP_STORE_CONNECT_PRIVATE_KEY" | grep -q "BEGIN PRIVATE KEY"; then
+            printf "%s" "$APP_STORE_CONNECT_PRIVATE_KEY" | sed 's/\\n/\n/g' > "$key_path"
+            key_source="APP_STORE_CONNECT_PRIVATE_KEY"
+          # Else accept either raw PEM or base64 in APPLE_STORE_CONNECT_API_KEY_BASE64.
+          elif [ -n "${APPLE_STORE_CONNECT_API_KEY_BASE64:-}" ] && printf "%s" "$APPLE_STORE_CONNECT_API_KEY_BASE64" | grep -q "BEGIN PRIVATE KEY"; then
             printf "%s" "$APPLE_STORE_CONNECT_API_KEY_BASE64" | sed 's/\\n/\n/g' > "$key_path"
-          elif ! printf "%s" "$APPLE_STORE_CONNECT_API_KEY_BASE64" | base64 --decode > "$key_path" 2>/dev/null; then
-            echo "APPLE_STORE_CONNECT_API_KEY_BASE64 must contain base64 key bytes or raw PEM text"
+            key_source="APPLE_STORE_CONNECT_API_KEY_BASE64(raw)"
+          elif [ -n "${APPLE_STORE_CONNECT_API_KEY_BASE64:-}" ] && printf "%s" "$APPLE_STORE_CONNECT_API_KEY_BASE64" | tr -d ' \n\r\t' | base64 --decode > "$key_path" 2>/dev/null; then
+            key_source="APPLE_STORE_CONNECT_API_KEY_BASE64(base64)"
+          else
+            echo "Could not resolve a valid App Store Connect API private key from secrets"
+            echo "Expected APP_STORE_CONNECT_PRIVATE_KEY (raw PEM) or APPLE_STORE_CONNECT_API_KEY_BASE64 (raw PEM/base64)"
             exit 1
           fi
+
+          echo "Using App Store key source: $key_source"
           if ! grep -q "BEGIN PRIVATE KEY" "$key_path"; then
-            echo "Provided APPLE_STORE_CONNECT_API_KEY_BASE64 does not resolve to a valid .p8 private key"
+            echo "Provided App Store key secret does not resolve to a valid .p8 private key"
             exit 1
           fi
 
