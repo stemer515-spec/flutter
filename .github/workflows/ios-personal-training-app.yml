@@ -151,13 +151,6 @@ jobs:
           fi
           echo "APP_STORE_CONNECT_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
-      - name: Validate App Store Connect credentials
-        run: |
-          set -euo pipefail
-          xcrun altool --list-providers \
-            --apiKey "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
-            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID" >/dev/null
-
       - name: Flutter pub get
         run: |
           cd "$APP_DIR"
