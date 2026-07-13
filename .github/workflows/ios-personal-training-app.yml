@@ -219,6 +219,15 @@ jobs:
           echo "==== Resolved Firebase package versions ===="
           flutter pub deps | grep -E "firebase_(core|auth|database|messaging|app_check)( |$)" || true
 
+      - name: Sync iOS build number
+        run: |
+          set -euo pipefail
+          cd "$APP_DIR"
+          new_version="1.5.15+${GITHUB_RUN_NUMBER}"
+          echo "Using app version: $new_version"
+          perl -0pi -e "s/^version: .*/version: ${new_version}/m" pubspec.yaml
+          grep -n '^version:' pubspec.yaml
+
       - name: Resolve FirebaseService import collision
         run: |
           cd "$APP_DIR"
