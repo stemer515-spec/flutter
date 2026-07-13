@@ -158,9 +158,10 @@ jobs:
 
           cert_key_path="$RUNNER_TEMP/distribution_certificate.key"
           printf "%s" "$APP_STORE_CONNECT_CERTIFICATE_KEY" | sed 's/\\n/\n/g' > "$cert_key_path"
+          fetch_signing_log="$RUNNER_TEMP/fetch-signing-files.log"
 
           keychain initialize
-          app-store-connect fetch-signing-files \
+          if ! app-store-connect fetch-signing-files \
             "$IOS_BUNDLE_ID" \
             --platform IOS \
             --type IOS_APP_STORE \
@@ -168,7 +169,14 @@ jobs:
             --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
             --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
             --private-key "@file:$APP_STORE_CONNECT_API_KEY_PATH" \
-            --certificate-key "@file:$cert_key_path"
+            --certificate-key "@file:$cert_key_path" \
+            2>&1 | tee "$fetch_signing_log"; then
+            if grep -q "POST .*\/v1\/profiles.* returned 403" "$fetch_signing_log"; then
+              echo "App Store Connect API key is not allowed to create provisioning profiles (403)."
+              echo "Use a key with higher permission (App Manager/Admin) or ask a Team Admin to create an iOS App Store profile for $IOS_BUNDLE_ID and certificate 4DR2Y7GWYA."
+            fi
+            exit 1
+          fi
           keychain add-certificates -A
           xcode-project use-profiles \
             --project "$APP_DIR/ios/Runner.xcodeproj" \
