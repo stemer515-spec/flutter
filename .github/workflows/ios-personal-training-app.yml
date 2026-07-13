@@ -205,6 +205,14 @@ jobs:
       - name: Flutter pub get
         run: |
           cd "$APP_DIR"
+          # Keep FlutterFire packages on a compatible set in CI to avoid
+          # mixed transitive versions (for example missing FirebasePlugin type).
+          flutter pub upgrade \
+            firebase_core \
+            firebase_auth \
+            firebase_database \
+            firebase_messaging \
+            firebase_app_check || true
           flutter pub get
 
       - name: Resolve FirebaseService import collision
