@@ -192,10 +192,15 @@ jobs:
           fi
           keychain add-certificates -A
           xcode-project use-profiles \
-            --project "$APP_DIR/ios/Runner.xcodeproj" \
+            --project "ios/Runner.xcodeproj" \
             --archive-method app-store \
             --export-options-plist "$HOME/export_options.plist" \
             --code-signing-setup-verbose-logging
+
+          echo "==== Installed provisioning profiles ===="
+          ls -la "$HOME/Library/MobileDevice/Provisioning Profiles" || true
+          echo "==== Runner signing build settings ===="
+          xcodebuild -workspace "ios/Runner.xcworkspace" -scheme Runner -showBuildSettings | grep -E "CODE_SIGN_STYLE|DEVELOPMENT_TEAM|PROVISIONING_PROFILE|PROVISIONING_PROFILE_SPECIFIER|PRODUCT_BUNDLE_IDENTIFIER|CODE_SIGN_IDENTITY" || true
 
       - name: Flutter pub get
         run: |
