@@ -210,7 +210,7 @@ jobs:
             -allowProvisioningUpdates \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             CODE_SIGN_STYLE=Automatic \
-            | tee "$RUNNER_TEMP/xcodebuild-archive.log"; then
+            2>&1 | tee "$RUNNER_TEMP/xcodebuild-archive.log"; then
             echo "==== xcodebuild archive error lines ===="
             grep -niE "(^|[^A-Za-z])(fatal error:|error:|\*\* ARCHIVE FAILED \*\*|Command PhaseScriptExecution failed)" "$RUNNER_TEMP/xcodebuild-archive.log" || true
             echo "==== xcodebuild archive failure context ===="
@@ -229,7 +229,7 @@ jobs:
             -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             CODE_SIGN_STYLE=Automatic \
-            | tee "$RUNNER_TEMP/xcodebuild-export.log"; then
+            2>&1 | tee "$RUNNER_TEMP/xcodebuild-export.log"; then
             echo "==== xcodebuild export error lines ===="
             grep -niE "(^|[^A-Za-z])(fatal error:|error:|\*\* EXPORT FAILED \*\*|Command PhaseScriptExecution failed)" "$RUNNER_TEMP/xcodebuild-export.log" || true
             echo "==== xcodebuild export failure context ===="
