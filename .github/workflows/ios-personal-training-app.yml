@@ -164,6 +164,7 @@ jobs:
             "$IOS_BUNDLE_ID" \
             --platform IOS \
             --type IOS_APP_STORE \
+            --create \
             --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
             --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
             --private-key "@file:$APP_STORE_CONNECT_API_KEY_PATH" \
