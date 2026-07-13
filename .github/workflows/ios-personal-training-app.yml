@@ -37,7 +37,6 @@ jobs:
       APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
       APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APP_STORE_CONNECT_KEY_IDENTIFIER }}
       APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
-      APP_STORE_CONNECT_CERTIFICATE_KEY: ${{ secrets.APP_STORE_CONNECT_CERTIFICATE_KEY }}
       UPLOAD_TO_TESTFLIGHT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.upload_to_testflight || secrets.UPLOAD_TO_TESTFLIGHT }}
 
     steps:
@@ -85,23 +84,24 @@ jobs:
           fi
           sed -i '' "s/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]\+;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g" ios/Runner.xcodeproj/project.pbxproj
 
-      - name: Set up iOS signing
+      - name: Prepare export options
         run: |
-          cd "$APP_DIR"
-          if [ -z "$APP_STORE_CONNECT_CERTIFICATE_KEY" ]; then
-            echo "Missing secret: APP_STORE_CONNECT_CERTIFICATE_KEY"
-            exit 1
-          fi
-          printf "%s" "$APP_STORE_CONNECT_CERTIFICATE_KEY" > "$RUNNER_TEMP/cert_key"
-          keychain initialize
-          app-store-connect fetch-signing-files \
-            "$IOS_BUNDLE_ID" \
-            --platform IOS \
-            --type IOS_APP_STORE \
-            --certificate-key=@file:"$RUNNER_TEMP/cert_key" \
-            --create
-          keychain add-certificates
-          xcode-project use-profiles
+          cat > "$HOME/export_options.plist" << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>method</key>
+    <string>app-store</string>
+    <key>signingStyle</key>
+    <string>automatic</string>
+    <key>stripSwiftSymbols</key>
+    <true/>
+    <key>uploadBitcode</key>
+    <false/>
+</dict>
+</plist>
+EOF
 
       - name: Flutter pub get
         run: |
