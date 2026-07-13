@@ -275,6 +275,10 @@ jobs:
           : > "$RUNNER_TEMP/xcodebuild-archive.log"
           : > "$RUNNER_TEMP/xcodebuild-export.log"
 
+          # Ensure each CI upload uses a strictly increasing build number.
+          IOS_BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
+          echo "Using iOS build number: $IOS_BUILD_NUMBER"
+
           # This flag may not be available on every Flutter toolchain version.
           flutter config --no-enable-swift-package-manager || true
 
@@ -290,6 +294,7 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath "build/ios/archive/Runner.xcarchive" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CURRENT_PROJECT_VERSION="$IOS_BUILD_NUMBER" \
             CODE_SIGN_STYLE=Manual \
             2>&1 | tee "$RUNNER_TEMP/xcodebuild-archive.log"; then
             echo "==== xcodebuild archive error lines ===="
