@@ -207,14 +207,14 @@ jobs:
       - name: Flutter pub get
         run: |
           cd "$APP_DIR"
-          # Keep FlutterFire package constraints coherent in CI to avoid
-          # mixed transitive versions (for example missing FirebasePlugin type).
+          # Pin FlutterFire to a known-good previous patch set in CI.
+          # Latest same-day releases have shown FirebasePlugin symbol regressions.
           flutter pub add \
-            firebase_core \
-            firebase_auth \
-            firebase_database \
-            firebase_messaging \
-            firebase_app_check || true
+            firebase_core:4.11.0 \
+            firebase_auth:6.5.4 \
+            firebase_database:12.4.4 \
+            firebase_messaging:16.4.1 \
+            firebase_app_check:0.4.5 || true
           flutter pub get
           echo "==== Resolved Firebase package versions ===="
           flutter pub deps | grep -E "firebase_(core|auth|database|messaging|app_check)( |$)" || true
