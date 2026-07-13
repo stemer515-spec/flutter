@@ -3,6 +3,7 @@ name: iOS Personal Training App Build
 on:
   push:
     branches:
+      - main
       - master
   workflow_dispatch:
     inputs:
@@ -45,7 +46,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.sha }}
+          # The full app source lives on main; master contains partial iOS-only files.
+          ref: main
           path: app_repo
 
       - name: Set up Xcode
