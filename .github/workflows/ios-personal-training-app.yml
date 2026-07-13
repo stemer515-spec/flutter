@@ -35,7 +35,7 @@ jobs:
       LC_ALL: en_US.UTF-8
       COCOAPODS_DISABLE_STATS: "true"
       APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-      APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APPLE_STORE_CONNECT_API_KEY_ID || secrets.APP_STORE_CONNECT_KEY_IDENTIFIER }}
+      APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APPLE_STORE_CONNECT_API_KEY_ID }}
       APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
       APPLE_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APPLE_STORE_CONNECT_API_KEY_BASE64 }}
       UPLOAD_TO_TESTFLIGHT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.upload_to_testflight || secrets.UPLOAD_TO_TESTFLIGHT }}
@@ -107,12 +107,18 @@ jobs:
       - name: Set up App Store Connect API key for xcodebuild
         run: |
           set -euo pipefail
+          APP_STORE_CONNECT_ISSUER_ID="$(printf '%s' "${APP_STORE_CONNECT_ISSUER_ID:-}" | tr -d '\r' | xargs)"
+          APP_STORE_CONNECT_KEY_IDENTIFIER="$(printf '%s' "${APP_STORE_CONNECT_KEY_IDENTIFIER:-}" | tr -d '\r' | xargs)"
+
+          echo "APP_STORE_CONNECT_ISSUER_ID=$APP_STORE_CONNECT_ISSUER_ID" >> "$GITHUB_ENV"
+          echo "APP_STORE_CONNECT_KEY_IDENTIFIER=$APP_STORE_CONNECT_KEY_IDENTIFIER" >> "$GITHUB_ENV"
+
           if [ -z "${APP_STORE_CONNECT_ISSUER_ID:-}" ]; then
             echo "Missing secret: APP_STORE_CONNECT_ISSUER_ID"
             exit 1
           fi
           if [ -z "${APP_STORE_CONNECT_KEY_IDENTIFIER:-}" ]; then
-            echo "Missing secret: APP_STORE_CONNECT_KEY_IDENTIFIER (or APPLE_STORE_CONNECT_API_KEY_ID)"
+            echo "Missing secret: APPLE_STORE_CONNECT_API_KEY_ID"
             exit 1
           fi
 
@@ -144,6 +150,13 @@ jobs:
             exit 1
           fi
           echo "APP_STORE_CONNECT_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+
+      - name: Validate App Store Connect credentials
+        run: |
+          set -euo pipefail
+          xcrun altool --list-providers \
+            --apiKey "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
+            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID" >/dev/null
 
       - name: Flutter pub get
         run: |
