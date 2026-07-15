@@ -3,6 +3,7 @@ name: iOS Personal Training App Build
 on:
   push:
     branches:
+      - main
       - master
   workflow_dispatch:
     inputs:
@@ -35,8 +36,9 @@ jobs:
       LC_ALL: en_US.UTF-8
       COCOAPODS_DISABLE_STATS: "true"
       APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-      APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APP_STORE_CONNECT_KEY_IDENTIFIER }}
+      APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APPLE_STORE_CONNECT_API_KEY_ID }}
       APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+      APPLE_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APPLE_STORE_CONNECT_API_KEY_BASE64 }}
       APP_STORE_CONNECT_CERTIFICATE_KEY: ${{ secrets.APP_STORE_CONNECT_CERTIFICATE_KEY }}
       UPLOAD_TO_TESTFLIGHT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.upload_to_testflight || secrets.UPLOAD_TO_TESTFLIGHT }}
 
@@ -44,6 +46,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
+          # The full app source lives on main; master contains partial iOS-only files.
           ref: main
           path: app_repo
 
@@ -85,28 +88,145 @@ jobs:
           fi
           sed -i '' "s/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]\+;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g" ios/Runner.xcodeproj/project.pbxproj
 
-      - name: Set up iOS signing
+      - name: Prepare export options
         run: |
-          cd "$APP_DIR"
-          if [ -z "$APP_STORE_CONNECT_CERTIFICATE_KEY" ]; then
-            echo "Missing secret: APP_STORE_CONNECT_CERTIFICATE_KEY"
+          cat > "$HOME/export_options.plist" << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>stripSwiftSymbols</key>
+            <true/>
+            <key>uploadBitcode</key>
+            <false/>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Set up App Store Connect API key for xcodebuild
+        run: |
+          set -euo pipefail
+          APP_STORE_CONNECT_ISSUER_ID="$(printf '%s' "${APP_STORE_CONNECT_ISSUER_ID:-}" | tr -d '\r' | xargs)"
+          APP_STORE_CONNECT_KEY_IDENTIFIER="$(printf '%s' "${APP_STORE_CONNECT_KEY_IDENTIFIER:-}" | tr -d '\r' | xargs)"
+
+          echo "APP_STORE_CONNECT_ISSUER_ID=$APP_STORE_CONNECT_ISSUER_ID" >> "$GITHUB_ENV"
+          echo "APP_STORE_CONNECT_KEY_IDENTIFIER=$APP_STORE_CONNECT_KEY_IDENTIFIER" >> "$GITHUB_ENV"
+
+          if [ -z "${APP_STORE_CONNECT_ISSUER_ID:-}" ]; then
+            echo "Missing secret: APP_STORE_CONNECT_ISSUER_ID"
             exit 1
           fi
-          printf "%s" "$APP_STORE_CONNECT_CERTIFICATE_KEY" > "$RUNNER_TEMP/cert_key"
+          if [ -z "${APP_STORE_CONNECT_KEY_IDENTIFIER:-}" ]; then
+            echo "Missing secret: APPLE_STORE_CONNECT_API_KEY_ID"
+            exit 1
+          fi
+          if [ -z "${APPLE_STORE_CONNECT_API_KEY_BASE64:-}" ] && [ -z "${APP_STORE_CONNECT_PRIVATE_KEY:-}" ]; then
+            echo "Missing key secret: set APPLE_STORE_CONNECT_API_KEY_BASE64 or APP_STORE_CONNECT_PRIVATE_KEY"
+            exit 1
+          fi
+
+          key_path="$RUNNER_TEMP/AuthKey_${APP_STORE_CONNECT_KEY_IDENTIFIER}.p8"
+          key_source=""
+
+          # Prefer explicitly named raw private key secret if present.
+          if [ -n "${APP_STORE_CONNECT_PRIVATE_KEY:-}" ] && printf "%s" "$APP_STORE_CONNECT_PRIVATE_KEY" | grep -q "BEGIN PRIVATE KEY"; then
+            printf "%s" "$APP_STORE_CONNECT_PRIVATE_KEY" | sed 's/\\n/\n/g' > "$key_path"
+            key_source="APP_STORE_CONNECT_PRIVATE_KEY"
+          # Else accept either raw PEM or base64 in APPLE_STORE_CONNECT_API_KEY_BASE64.
+          elif [ -n "${APPLE_STORE_CONNECT_API_KEY_BASE64:-}" ] && printf "%s" "$APPLE_STORE_CONNECT_API_KEY_BASE64" | grep -q "BEGIN PRIVATE KEY"; then
+            printf "%s" "$APPLE_STORE_CONNECT_API_KEY_BASE64" | sed 's/\\n/\n/g' > "$key_path"
+            key_source="APPLE_STORE_CONNECT_API_KEY_BASE64(raw)"
+          elif [ -n "${APPLE_STORE_CONNECT_API_KEY_BASE64:-}" ] && printf "%s" "$APPLE_STORE_CONNECT_API_KEY_BASE64" | tr -d ' \n\r\t' | base64 --decode > "$key_path" 2>/dev/null; then
+            key_source="APPLE_STORE_CONNECT_API_KEY_BASE64(base64)"
+          else
+            echo "Could not resolve a valid App Store Connect API private key from secrets"
+            echo "Expected APP_STORE_CONNECT_PRIVATE_KEY (raw PEM) or APPLE_STORE_CONNECT_API_KEY_BASE64 (raw PEM/base64)"
+            exit 1
+          fi
+
+          echo "Using App Store key source: $key_source"
+          if ! grep -q "BEGIN PRIVATE KEY" "$key_path"; then
+            echo "Provided App Store key secret does not resolve to a valid .p8 private key"
+            exit 1
+          fi
+
+          chmod 600 "$key_path"
+          if ! openssl pkey -in "$key_path" -noout >/dev/null 2>&1; then
+            echo "Generated key file is not a valid private key"
+            exit 1
+          fi
+          echo "APP_STORE_CONNECT_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+
+      - name: Fetch App Store signing files
+        run: |
+          set -euo pipefail
+          cd "$APP_DIR"
+          if [ -z "${APP_STORE_CONNECT_CERTIFICATE_KEY:-}" ]; then
+            echo "Missing secret: APP_STORE_CONNECT_CERTIFICATE_KEY"
+            echo "This must be the Apple Distribution certificate private key used by Codemagic to create or save signing certificates."
+            exit 1
+          fi
+
+          cert_key_path="$RUNNER_TEMP/distribution_certificate.key"
+          printf "%s" "$APP_STORE_CONNECT_CERTIFICATE_KEY" | sed 's/\\n/\n/g' > "$cert_key_path"
+          fetch_signing_log="$RUNNER_TEMP/fetch-signing-files.log"
+
           keychain initialize
-          app-store-connect fetch-signing-files \
+          if ! app-store-connect fetch-signing-files \
             "$IOS_BUNDLE_ID" \
             --platform IOS \
             --type IOS_APP_STORE \
-            --certificate-key=@file:"$RUNNER_TEMP/cert_key" \
-            --create
-          keychain add-certificates
-          xcode-project use-profiles
+            --create \
+            --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
+            --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
+            --private-key "@file:$APP_STORE_CONNECT_API_KEY_PATH" \
+            --certificate-key "@file:$cert_key_path" \
+            2>&1 | tee "$fetch_signing_log"; then
+            if grep -q "POST .*\/v1\/profiles.* returned 403" "$fetch_signing_log"; then
+              echo "App Store Connect API key is not allowed to create provisioning profiles (403)."
+              echo "Use a key with higher permission (App Manager/Admin) or ask a Team Admin to create an iOS App Store profile for $IOS_BUNDLE_ID and certificate 4DR2Y7GWYA."
+            fi
+            exit 1
+          fi
+          keychain add-certificates -A
+          xcode-project use-profiles \
+            --project "ios/Runner.xcodeproj" \
+            --archive-method app-store \
+            --export-options-plist "$HOME/export_options.plist" \
+            --code-signing-setup-verbose-logging
+
+          echo "==== Installed provisioning profiles ===="
+          ls -la "$HOME/Library/MobileDevice/Provisioning Profiles" || true
+          echo "==== Runner signing build settings ===="
+          xcodebuild -workspace "ios/Runner.xcworkspace" -scheme Runner -showBuildSettings | grep -E "CODE_SIGN_STYLE|DEVELOPMENT_TEAM|PROVISIONING_PROFILE|PROVISIONING_PROFILE_SPECIFIER|PRODUCT_BUNDLE_IDENTIFIER|CODE_SIGN_IDENTITY" || true
 
       - name: Flutter pub get
         run: |
           cd "$APP_DIR"
+          # Pin FlutterFire to a known-good previous patch set in CI.
+          # Latest same-day releases have shown FirebasePlugin symbol regressions.
+          flutter pub add \
+            firebase_core:4.11.0 \
+            firebase_auth:6.5.4 \
+            firebase_database:12.4.4 \
+            firebase_messaging:16.4.1 \
+            firebase_app_check:0.4.5 || true
           flutter pub get
+          echo "==== Resolved Firebase package versions ===="
+          flutter pub deps | grep -E "firebase_(core|auth|database|messaging|app_check)( |$)" || true
+
+      - name: Sync iOS build number
+        run: |
+          set -euo pipefail
+          cd "$APP_DIR"
+          new_version="1.5.15+${GITHUB_RUN_NUMBER}"
+          echo "Using app version: $new_version"
+          perl -0pi -e "s/^version: .*/version: ${new_version}/m" pubspec.yaml
+          grep -n '^version:' pubspec.yaml
 
       - name: Resolve FirebaseService import collision
         run: |
@@ -161,15 +281,31 @@ jobs:
         run: |
           set -euo pipefail
           cd "$APP_DIR"
-          flutter config --no-enable-swift-package-manager
+          : > "$RUNNER_TEMP/xcodebuild-archive.log"
+          : > "$RUNNER_TEMP/xcodebuild-export.log"
+
+          # Ensure each CI upload uses a strictly increasing build number.
+          IOS_BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
+          echo "Using iOS build number: $IOS_BUILD_NUMBER"
+
+          # This flag may not be available on every Flutter toolchain version.
+          flutter config --no-enable-swift-package-manager || true
+
+          if [ ! -f "$APP_STORE_CONNECT_API_KEY_PATH" ]; then
+            echo "App Store Connect API key file not found at: $APP_STORE_CONNECT_API_KEY_PATH"
+            exit 1
+          fi
+
           if ! xcodebuild archive \
             -workspace "ios/Runner.xcworkspace" \
             -scheme Runner \
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "build/ios/archive/Runner.xcarchive" \
-            -allowProvisioningUpdates \
-            | tee "$RUNNER_TEMP/xcodebuild-archive.log"; then
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CURRENT_PROJECT_VERSION="$IOS_BUILD_NUMBER" \
+            CODE_SIGN_STYLE=Manual \
+            2>&1 | tee "$RUNNER_TEMP/xcodebuild-archive.log"; then
             echo "==== xcodebuild archive error lines ===="
             grep -niE "(^|[^A-Za-z])(fatal error:|error:|\*\* ARCHIVE FAILED \*\*|Command PhaseScriptExecution failed)" "$RUNNER_TEMP/xcodebuild-archive.log" || true
             echo "==== xcodebuild archive failure context ===="
@@ -183,7 +319,9 @@ jobs:
             -archivePath "build/ios/archive/Runner.xcarchive" \
             -exportPath "build/ios/ipa" \
             -exportOptionsPlist "$HOME/export_options.plist" \
-            | tee "$RUNNER_TEMP/xcodebuild-export.log"; then
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Manual \
+            2>&1 | tee "$RUNNER_TEMP/xcodebuild-export.log"; then
             echo "==== xcodebuild export error lines ===="
             grep -niE "(^|[^A-Za-z])(fatal error:|error:|\*\* EXPORT FAILED \*\*|Command PhaseScriptExecution failed)" "$RUNNER_TEMP/xcodebuild-export.log" || true
             echo "==== xcodebuild export failure context ===="
