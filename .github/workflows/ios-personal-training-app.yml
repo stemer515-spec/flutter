@@ -7,6 +7,26 @@ on:
       - master
   workflow_dispatch:
     inputs:
+      app_repository:
+        description: GitHub repository in owner/repo format that contains the app source
+        required: true
+        default: steme/personal_training_app_repo
+        type: string
+      app_project_dir:
+        description: App project directory inside the repository (use . for repo root)
+        required: true
+        default: .
+        type: string
+      app_ref:
+        description: Git ref (branch/tag/SHA) to build from
+        required: true
+        default: main
+        type: string
+      login_fix_commit:
+        description: Optional commit SHA that must be included in the build ref
+        required: false
+        default: ""
+        type: string
       app_env:
         description: Build environment passed as APP_ENV
         required: true
@@ -23,13 +43,63 @@ on:
         options:
           - "false"
           - "true"
+  workflow_call:
+    inputs:
+      app_repository:
+        description: GitHub repository in owner/repo format that contains the app source
+        required: false
+        default: steme/personal_training_app_repo
+        type: string
+      app_project_dir:
+        description: App project directory inside the repository (use . for repo root)
+        required: false
+        default: .
+        type: string
+      app_ref:
+        description: Git ref (branch/tag/SHA) to build from
+        required: false
+        default: main
+        type: string
+      login_fix_commit:
+        description: Optional commit SHA that must be included in the build ref
+        required: false
+        default: ""
+        type: string
+      app_env:
+        description: Build environment passed as APP_ENV
+        required: false
+        default: production
+        type: string
+      upload_to_testflight:
+        description: Upload IPA to TestFlight after successful build
+        required: false
+        default: "false"
+        type: string
+    secrets:
+      APP_STORE_CONNECT_ISSUER_ID:
+        required: false
+      APPLE_STORE_CONNECT_API_KEY_ID:
+        required: false
+      APP_STORE_CONNECT_PRIVATE_KEY:
+        required: false
+      APPLE_STORE_CONNECT_API_KEY_BASE64:
+        required: false
+      APP_STORE_CONNECT_CERTIFICATE_KEY:
+        required: false
+      UPLOAD_TO_TESTFLIGHT:
+        required: false
 
 jobs:
   build-ios:
     runs-on: macos-15
     env:
-      APP_DIR: app_repo/examples/personal_training_app
-      APP_ENV: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.app_env || 'production' }}
+      APP_REPOSITORY: ${{ inputs.app_repository || (github.event_name == 'workflow_dispatch' && github.event.inputs.app_repository) || 'steme/personal_training_app_repo' }}
+      APP_PROJECT_DIR: ${{ inputs.app_project_dir || (github.event_name == 'workflow_dispatch' && github.event.inputs.app_project_dir) || '.' }}
+      APP_DIR: app_repo/${{ inputs.app_project_dir || (github.event_name == 'workflow_dispatch' && github.event.inputs.app_project_dir) || '.' }}
+      APP_REF: ${{ inputs.app_ref || (github.event_name == 'workflow_dispatch' && github.event.inputs.app_ref) || 'main' }}
+      LOGIN_FIX_COMMIT: ${{ inputs.login_fix_commit || (github.event_name == 'workflow_dispatch' && github.event.inputs.login_fix_commit) || '' }}
+      REQUIRED_LOGIN_FIX_COMMIT: ${{ vars.REQUIRED_LOGIN_FIX_COMMIT || '' }}
+      APP_ENV: ${{ inputs.app_env || (github.event_name == 'workflow_dispatch' && github.event.inputs.app_env) || 'production' }}
       IOS_BUNDLE_ID: com.simtrainingpartner.simtrainingpartner
       APPLE_TEAM_ID: 5QHDS9AQFB
       LANG: en_US.UTF-8
@@ -40,15 +110,71 @@ jobs:
       APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
       APPLE_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APPLE_STORE_CONNECT_API_KEY_BASE64 }}
       APP_STORE_CONNECT_CERTIFICATE_KEY: ${{ secrets.APP_STORE_CONNECT_CERTIFICATE_KEY }}
-      UPLOAD_TO_TESTFLIGHT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.upload_to_testflight || secrets.UPLOAD_TO_TESTFLIGHT }}
+      UPLOAD_TO_TESTFLIGHT: ${{ inputs.upload_to_testflight || (github.event_name == 'workflow_dispatch' && github.event.inputs.upload_to_testflight) || secrets.UPLOAD_TO_TESTFLIGHT || 'false' }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          # The full app source lives on main; master contains partial iOS-only files.
-          ref: main
+          repository: ${{ env.APP_REPOSITORY }}
+          ref: ${{ env.APP_REF }}
+          fetch-depth: 0
           path: app_repo
+
+      - name: Report selected app source
+        run: |
+          echo "APP_REPOSITORY=$APP_REPOSITORY"
+          echo "APP_REF=$APP_REF"
+          echo "APP_PROJECT_DIR=$APP_PROJECT_DIR"
+          echo "APP_DIR=$APP_DIR"
+
+      - name: Verify login fix commit is included
+        run: |
+          set -euo pipefail
+          cd app_repo
+          commit="$(printf '%s' "${LOGIN_FIX_COMMIT:-}" | tr -d '\r' | xargs)"
+          required_commit="$(printf '%s' "${REQUIRED_LOGIN_FIX_COMMIT:-}" | tr -d '\r' | xargs)"
+
+          # Priority: explicit run input, then repository variable override.
+          if [ -z "$commit" ] && [ -n "$required_commit" ]; then
+            commit="$required_commit"
+          fi
+
+          # Force manual dispatches to provide a guard commit so ad-hoc builds
+          # cannot accidentally omit critical auth fixes.
+          if [ -z "$commit" ] && [ "${GITHUB_EVENT_NAME:-}" = "workflow_dispatch" ]; then
+            echo "Manual run is missing login_fix_commit."
+            echo "Use iPhone Login Fix Verify workflow or pass login_fix_commit explicitly."
+            exit 1
+          fi
+
+          if [ -z "$commit" ]; then
+            echo "No login fix guard commit configured; skipping commit inclusion guard."
+            exit 0
+          fi
+
+          if ! printf '%s' "$commit" | grep -Eq '^[0-9a-fA-F]{7,40}$'; then
+            echo "login_fix_commit must be a Git SHA (7-40 hex chars)."
+            exit 1
+          fi
+
+          if ! git cat-file -e "$commit^{commit}" 2>/dev/null; then
+            echo "Commit $commit was not found in fetched history."
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor "$commit" HEAD; then
+            echo "Ref $APP_REF does not include login fix commit $commit."
+            exit 1
+          fi
+
+          echo "Verified: ref $APP_REF includes login fix commit $commit."
+          {
+            echo "## Login Fix Guard"
+            echo "- app_ref: $APP_REF"
+            echo "- built_head: $(git rev-parse HEAD)"
+            echo "- verified_commit: $commit"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Xcode
         uses: maxim-lobanov/setup-xcode@v1

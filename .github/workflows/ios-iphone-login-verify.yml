@@ -1,0 +1,45 @@
+name: iPhone Login Fix Verify
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_repository:
+        description: GitHub repository in owner/repo format that contains the app source
+        required: true
+        default: steme/personal_training_app_repo
+        type: string
+      app_project_dir:
+        description: App project directory inside the repository (use . for repo root)
+        required: true
+        default: .
+        type: string
+      app_ref:
+        description: Git ref (branch/tag/SHA) to build from
+        required: true
+        default: main
+        type: string
+      login_fix_commit:
+        description: Commit SHA for the login fix that must be present in app_ref
+        required: true
+        type: string
+      app_env:
+        description: Build environment passed as APP_ENV
+        required: true
+        default: production
+        type: choice
+        options:
+          - production
+          - staging
+
+jobs:
+  build-iphone-ipa:
+    name: Build iPhone IPA (no TestFlight upload)
+    uses: ./.github/workflows/ios-personal-training-app.yml
+    with:
+      app_repository: ${{ inputs.app_repository }}
+      app_project_dir: ${{ inputs.app_project_dir }}
+      app_ref: ${{ inputs.app_ref }}
+      login_fix_commit: ${{ inputs.login_fix_commit }}
+      app_env: ${{ inputs.app_env }}
+      upload_to_testflight: "false"
+    secrets: inherit
