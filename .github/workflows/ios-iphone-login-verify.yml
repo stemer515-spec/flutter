@@ -6,12 +6,12 @@ on:
       app_repository:
         description: GitHub repository in owner/repo format that contains the app source
         required: true
-        default: steme/personal_training_app_repo
+        default: stemer515-spec/SIMTrainingPartner-iSO
         type: string
       app_project_dir:
         description: App project directory inside the repository (use . for repo root)
         required: true
-        default: .
+        default: examples/personal_training_app
         type: string
       app_ref:
         description: Git ref (branch/tag/SHA) to build from
